@@ -118,7 +118,7 @@ bool convert_to_ascii(short*, size_t);
 bool to_ascii(short*, size_t);
 ```
 
-[](#names-if-exists) When there are two getters for a variable, and one of them automatically makes sure the requested object is instantiated, prefix that getter function which with `ensure_`. As it ensures that an object is created, it should consequently also return a reference, not a pointer.
+[](#names-if-exists) When there are two getters for a variable, and one of them automatically makes sure the requested object is instantiated, prefix that getter function with `ensure_`. As it ensures that an object is created, it should consequently also return a reference, not a pointer.
 
 ###### Right:
 
@@ -261,8 +261,7 @@ for (auto it = children.begin(); it != children.end(); ++it)
 
 ### Pointers and References
 
-[](#pointers-cpp) **Pointer and reference types in C++ code**
-Both pointer types and reference types should be written with no space between the type name and the `*` or `&`.
+[](#pointers-cpp) Both pointer types and reference types should be written with no space between the type name and the `*` or `&`.
 
 [](#pointers-out-argument) An out argument of a function should be passed by reference except rare cases where it is optional in which case it should be passed by pointer.
 

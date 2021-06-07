@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -158,6 +158,12 @@ CallExpression::ThisAndCallee CallExpression::compute_this_and_callee(Interprete
 
         return { this_value, callee };
     }
+
+    if (interpreter.vm().in_strict_mode()) {
+        // If we are in strict mode, |this| should never be bound to global object by default.
+        return { js_undefined(), m_callee->execute(interpreter, global_object) };
+    }
+
     return { &global_object, m_callee->execute(interpreter, global_object) };
 }
 
@@ -818,15 +824,15 @@ Value ClassExpression::execute(Interpreter& interpreter, GlobalObject& global_ob
 
         switch (method.kind()) {
         case ClassMethod::Kind::Method:
-            target.define_property(StringOrSymbol::from_value(global_object, key), method_value);
+            target.define_property(key.to_property_key(global_object), method_value);
             break;
         case ClassMethod::Kind::Getter:
             update_function_name(method_value, String::formatted("get {}", get_function_name(global_object, key)));
-            target.define_accessor(StringOrSymbol::from_value(global_object, key), &method_function, nullptr, Attribute::Configurable | Attribute::Enumerable);
+            target.define_accessor(key.to_property_key(global_object), &method_function, nullptr, Attribute::Configurable | Attribute::Enumerable);
             break;
         case ClassMethod::Kind::Setter:
             update_function_name(method_value, String::formatted("set {}", get_function_name(global_object, key)));
-            target.define_accessor(StringOrSymbol::from_value(global_object, key), nullptr, &method_function, Attribute::Configurable | Attribute::Enumerable);
+            target.define_accessor(key.to_property_key(global_object), nullptr, &method_function, Attribute::Configurable | Attribute::Enumerable);
             break;
         default:
             VERIFY_NOT_REACHED();
