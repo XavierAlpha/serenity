@@ -33,6 +33,8 @@ void JSONObject::initialize(GlobalObject& global_object)
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(vm.names.stringify, stringify, 3, attr);
     define_native_function(vm.names.parse, parse, 2, attr);
+
+    // 25.5.3 JSON [ @@toStringTag ], https://tc39.es/ecma262/#sec-json-@@tostringtag
     define_property(vm.well_known_symbol_to_string_tag(), js_string(global_object.heap(), "JSON"), Attribute::Configurable);
 }
 
@@ -48,7 +50,7 @@ String JSONObject::stringify_impl(GlobalObject& global_object, Value value, Valu
     if (replacer.is_object()) {
         if (replacer.as_object().is_function()) {
             state.replacer_function = &replacer.as_function();
-        } else if (replacer.is_array()) {
+        } else if (replacer.is_array(global_object)) {
             auto& replacer_object = replacer.as_object();
             auto replacer_length = length_of_array_like(global_object, replacer_object);
             if (vm.exception())
@@ -77,6 +79,8 @@ String JSONObject::stringify_impl(GlobalObject& global_object, Value value, Valu
             }
             state.property_list = list;
         }
+        if (vm.exception())
+            return {};
     }
 
     if (space.is_object()) {
@@ -115,6 +119,7 @@ String JSONObject::stringify_impl(GlobalObject& global_object, Value value, Valu
     return result;
 }
 
+// 25.5.2 JSON.stringify ( value [ , replacer [ , space ] ] ), https://tc39.es/ecma262/#sec-json.stringify
 JS_DEFINE_NATIVE_FUNCTION(JSONObject::stringify)
 {
     if (!vm.argument_count())
@@ -172,8 +177,10 @@ String JSONObject::serialize_json_property(GlobalObject& global_object, Stringif
         return "null";
     }
     if (value.is_object() && !value.is_function()) {
-        if (value.is_array())
+        if (value.is_array(global_object))
             return serialize_json_array(global_object, state, static_cast<Array&>(value.as_object()));
+        if (vm.exception())
+            return {};
         return serialize_json_object(global_object, state, value.as_object());
     }
     if (value.is_bigint())
@@ -372,6 +379,7 @@ String JSONObject::quote_json_string(String string)
     return builder.to_string();
 }
 
+// 25.5.1 JSON.parse ( text [ , reviver ] ), https://tc39.es/ecma262/#sec-json.parse
 JS_DEFINE_NATIVE_FUNCTION(JSONObject::parse)
 {
     if (!vm.argument_count())

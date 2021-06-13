@@ -23,6 +23,7 @@ public:
 
     virtual Optional<Variable> get_from_scope(const FlyString&) const override;
     virtual void put_to_scope(const FlyString&, Variable) override;
+    virtual bool delete_from_scope(FlyString const&) override;
     virtual bool has_this_binding() const override;
     virtual Value get_this_binding(GlobalObject&) const override;
 
@@ -110,7 +111,9 @@ inline void GlobalObject::initialize_constructor(const FlyString& property_name,
 template<typename ConstructorType>
 inline void GlobalObject::add_constructor(const FlyString& property_name, ConstructorType*& constructor, Object* prototype)
 {
-    initialize_constructor(property_name, constructor, prototype);
+    // Some constructors are pre-initialized separately.
+    if (!constructor)
+        initialize_constructor(property_name, constructor, prototype);
     define_property(property_name, constructor, Attribute::Writable | Attribute::Configurable);
 }
 

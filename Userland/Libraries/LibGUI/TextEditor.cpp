@@ -1170,24 +1170,25 @@ bool TextEditor::write_to_file(const String& path)
         return false;
     }
 
-    if (file_size == 0)
-        return true;
-
-    for (size_t i = 0; i < line_count(); ++i) {
-        auto& line = this->line(i);
-        if (line.length()) {
-            auto line_as_utf8 = line.to_utf8();
-            ssize_t nwritten = write(fd, line_as_utf8.characters(), line_as_utf8.length());
-            if (nwritten < 0) {
+    if (file_size == 0) {
+        // A size 0 file doesn't need a data copy.
+    } else {
+        for (size_t i = 0; i < line_count(); ++i) {
+            auto& line = this->line(i);
+            if (line.length()) {
+                auto line_as_utf8 = line.to_utf8();
+                ssize_t nwritten = write(fd, line_as_utf8.characters(), line_as_utf8.length());
+                if (nwritten < 0) {
+                    perror("write");
+                    return false;
+                }
+            }
+            char ch = '\n';
+            ssize_t nwritten = write(fd, &ch, 1);
+            if (nwritten != 1) {
                 perror("write");
                 return false;
             }
-        }
-        char ch = '\n';
-        ssize_t nwritten = write(fd, &ch, 1);
-        if (nwritten != 1) {
-            perror("write");
-            return false;
         }
     }
     document().set_unmodified();
@@ -1357,10 +1358,6 @@ void TextEditor::leave_event(Core::Event&)
 {
     if (m_in_drag_select)
         m_automatic_selection_scroll_timer->start();
-    if (m_autocomplete_timer)
-        m_autocomplete_timer->stop();
-    if (m_autocomplete_box)
-        m_autocomplete_box->close();
 }
 
 void TextEditor::did_change()
