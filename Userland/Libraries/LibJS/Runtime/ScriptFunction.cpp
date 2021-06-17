@@ -10,6 +10,7 @@
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/Bytecode/PassManager.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Error.h>
@@ -144,6 +145,9 @@ Value ScriptFunction::execute_function_body()
                         argument_value = js_undefined();
                     }
 
+                    if (i >= call_frame_args.size())
+                        call_frame_args.resize(i + 1);
+                    call_frame_args[i] = argument_value;
                     vm.assign(param, argument_value, global_object(), true, vm.current_scope());
                 });
 
@@ -156,7 +160,10 @@ Value ScriptFunction::execute_function_body()
         prepare_arguments();
         if (!m_bytecode_executable.has_value()) {
             m_bytecode_executable = Bytecode::Generator::generate(m_body, m_kind == FunctionKind::Generator);
+            auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
+            passes.perform(*m_bytecode_executable);
             if constexpr (JS_BYTECODE_DEBUG) {
+                dbgln("Optimisation passes took {}us", passes.elapsed());
                 dbgln("Compiled Bytecode::Block for function '{}':", m_name);
                 for (auto& block : m_bytecode_executable->basic_blocks)
                     block.dump(*m_bytecode_executable);

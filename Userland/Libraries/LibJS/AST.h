@@ -50,6 +50,17 @@ public:
 
     String class_name() const;
 
+    template<typename T>
+    bool fast_is() const = delete;
+
+    virtual bool is_new_expression() const { return false; }
+    virtual bool is_member_expression() const { return false; }
+    virtual bool is_super_expression() const { return false; }
+    virtual bool is_expression_statement() const { return false; }
+    virtual bool is_identifier() const { return false; }
+    virtual bool is_scope_node() const { return false; }
+    virtual bool is_program() const { return false; }
+
 protected:
     ASTNode(SourceRange source_range)
         : m_source_range(move(source_range))
@@ -108,6 +119,8 @@ public:
     Expression const& expression() const { return m_expression; };
 
 private:
+    virtual bool is_expression_statement() const override { return true; }
+
     NonnullRefPtr<Expression> m_expression;
 };
 
@@ -142,6 +155,8 @@ protected:
     }
 
 private:
+    virtual bool is_scope_node() const final { return true; }
+
     NonnullRefPtrVector<Statement> m_children;
     NonnullRefPtrVector<VariableDeclaration> m_variables;
     NonnullRefPtrVector<FunctionDeclaration> m_functions;
@@ -160,6 +175,8 @@ public:
     void set_strict_mode() { m_is_strict_mode = true; }
 
 private:
+    virtual bool is_program() const override { return true; }
+
     bool m_is_strict_mode { false };
 };
 
@@ -331,13 +348,15 @@ public:
 
 class YieldExpression final : public Expression {
 public:
-    explicit YieldExpression(SourceRange source_range, RefPtr<Expression> argument)
+    explicit YieldExpression(SourceRange source_range, RefPtr<Expression> argument, bool is_yield_from)
         : Expression(move(source_range))
         , m_argument(move(argument))
+        , m_is_yield_from(is_yield_from)
     {
     }
 
     Expression const* argument() const { return m_argument; }
+    bool is_yield_from() const { return m_is_yield_from; }
 
     virtual Value execute(Interpreter&, GlobalObject&) const override;
     virtual void dump(int indent) const override;
@@ -345,6 +364,7 @@ public:
 
 private:
     RefPtr<Expression> m_argument;
+    bool m_is_yield_from { false };
 };
 
 class ReturnStatement final : public Statement {
@@ -751,13 +771,15 @@ private:
 
 class Identifier final : public Expression {
 public:
-    explicit Identifier(SourceRange source_range, FlyString const& string)
-        : Expression(move(source_range))
-        , m_string(string)
+    explicit Identifier(SourceRange source_range, FlyString string, Optional<size_t> argument_index = {})
+        : Expression(source_range)
+        , m_string(move(string))
+        , m_argument_index(move(argument_index))
     {
     }
 
     FlyString const& string() const { return m_string; }
+    Optional<size_t> const& argument_index() const { return m_argument_index; }
 
     virtual Value execute(Interpreter&, GlobalObject&) const override;
     virtual void dump(int indent) const override;
@@ -765,7 +787,10 @@ public:
     virtual void generate_bytecode(Bytecode::Generator&) const override;
 
 private:
+    virtual bool is_identifier() const override { return true; }
+
     FlyString m_string;
+    Optional<size_t> m_argument_index;
 };
 
 class ClassMethod final : public ASTNode {
@@ -808,6 +833,8 @@ public:
 
     virtual Value execute(Interpreter&, GlobalObject&) const override;
     virtual void dump(int indent) const override;
+
+    virtual bool is_super_expression() const override { return true; }
 };
 
 class ClassExpression final : public Expression {
@@ -908,6 +935,8 @@ public:
         : CallExpression(move(source_range), move(callee), move(arguments))
     {
     }
+
+    virtual bool is_new_expression() const override { return true; }
 };
 
 enum class AssignmentOp {
@@ -1176,6 +1205,8 @@ public:
     String to_string_approximation() const;
 
 private:
+    virtual bool is_member_expression() const override { return true; }
+
     NonnullRefPtr<Expression> m_object;
     NonnullRefPtr<Expression> m_property;
     bool m_computed { false };
@@ -1377,5 +1408,26 @@ void BindingPattern::for_each_assigned_name(C&& callback) const
         property.pattern->template for_each_assigned_name(forward<C>(callback));
     }
 }
+
+template<>
+inline bool ASTNode::fast_is<NewExpression>() const { return is_new_expression(); }
+
+template<>
+inline bool ASTNode::fast_is<MemberExpression>() const { return is_member_expression(); }
+
+template<>
+inline bool ASTNode::fast_is<SuperExpression>() const { return is_super_expression(); }
+
+template<>
+inline bool ASTNode::fast_is<Identifier>() const { return is_identifier(); }
+
+template<>
+inline bool ASTNode::fast_is<ExpressionStatement>() const { return is_expression_statement(); }
+
+template<>
+inline bool ASTNode::fast_is<ScopeNode>() const { return is_scope_node(); }
+
+template<>
+inline bool ASTNode::fast_is<Program>() const { return is_program(); }
 
 }

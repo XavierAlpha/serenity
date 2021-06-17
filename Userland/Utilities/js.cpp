@@ -17,12 +17,14 @@
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/Bytecode/PassManager.h>
 #include <LibJS/Console.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/BooleanObject.h>
+#include <LibJS/Runtime/DataView.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/Function.h>
@@ -80,6 +82,7 @@ private:
 static bool s_dump_ast = false;
 static bool s_dump_bytecode = false;
 static bool s_run_bytecode = false;
+static bool s_opt_bytecode = false;
 static bool s_print_last_result = false;
 static RefPtr<Line::Editor> s_editor;
 static String s_history_path = String::formatted("{}/.js-history", Core::StandardPaths::home_directory());
@@ -363,6 +366,14 @@ static void print_array_buffer(const JS::Object& object, HashTable<JS::Object*>&
     }
 }
 
+template<typename T>
+static void print_number(T number) requires IsArithmetic<T>
+{
+    out("\033[35;1m");
+    out("{}", number);
+    out("\033[0m");
+}
+
 static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
 {
     auto& typed_array_base = static_cast<const JS::TypedArrayBase&>(object);
@@ -387,7 +398,7 @@ static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& 
         for (size_t i = 0; i < length; ++i) {                                            \
             if (i > 0)                                                                   \
                 out(", ");                                                               \
-            print_value(JS::Value(data[i]), seen_objects);                               \
+            print_number(data[i]);                                                       \
         }                                                                                \
         out(" ]");                                                                       \
         return;                                                                          \
@@ -395,6 +406,19 @@ static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& 
     JS_ENUMERATE_TYPED_ARRAYS
 #undef __JS_ENUMERATE
     VERIFY_NOT_REACHED();
+}
+
+static void print_data_view(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& data_view = static_cast<const JS::DataView&>(object);
+    print_type("DataView");
+    out("\n  byteLength: ");
+    print_value(JS::Value(data_view.byte_length()), seen_objects);
+    out("\n  byteOffset: ");
+    print_value(JS::Value(data_view.byte_offset()), seen_objects);
+    out("\n  buffer: ");
+    print_type("ArrayBuffer");
+    out(" @ {:p}", data_view.viewed_array_buffer());
 }
 
 static void print_primitive_wrapper_object(const FlyString& name, const JS::Object& object, HashTable<JS::Object*>& seen_objects)
@@ -438,6 +462,8 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
             return print_map(object, seen_objects);
         if (is<JS::Set>(object))
             return print_set(object, seen_objects);
+        if (is<JS::DataView>(object))
+            return print_data_view(object, seen_objects);
         if (is<JS::ProxyObject>(object))
             return print_proxy_object(object, seen_objects);
         if (is<JS::Promise>(object))
@@ -542,6 +568,12 @@ static bool parse_and_run(JS::Interpreter& interpreter, const StringView& source
     } else {
         if (s_dump_bytecode || s_run_bytecode) {
             auto unit = JS::Bytecode::Generator::generate(*program);
+            if (s_opt_bytecode) {
+                auto& passes = JS::Bytecode::Interpreter::optimization_pipeline();
+                passes.perform(unit);
+                dbgln("Optimisation passes took {}us", passes.elapsed());
+            }
+
             if (s_dump_bytecode) {
                 for (auto& block : unit.basic_blocks)
                     block.dump(unit);
@@ -802,17 +834,18 @@ int main(int argc, char** argv)
 {
     bool gc_on_every_allocation = false;
     bool disable_syntax_highlight = false;
-    const char* script_path = nullptr;
+    Vector<String> script_paths;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("This is a JavaScript interpreter.");
     args_parser.add_option(s_dump_ast, "Dump the AST", "dump-ast", 'A');
     args_parser.add_option(s_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
     args_parser.add_option(s_run_bytecode, "Run the bytecode", "run-bytecode", 'b');
+    args_parser.add_option(s_opt_bytecode, "Optimize the bytecode", "optimize-bytecode", 'p');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');
     args_parser.add_option(gc_on_every_allocation, "GC on every allocation", "gc-on-every-allocation", 'g');
     args_parser.add_option(disable_syntax_highlight, "Disable live syntax highlighting", "no-syntax-highlight", 's');
-    args_parser.add_positional_argument(script_path, "Path to script file", "script", Core::ArgsParser::Required::No);
+    args_parser.add_positional_argument(script_paths, "Path to script files", "scripts", Core::ArgsParser::Required::No);
     args_parser.parse(argc, argv);
 
     bool syntax_highlight = !disable_syntax_highlight;
@@ -845,7 +878,7 @@ int main(int argc, char** argv)
         vm->throw_exception(interpreter->global_object(), error);
     };
 
-    if (script_path == nullptr) {
+    if (script_paths.is_empty()) {
         s_print_last_result = true;
         interpreter = JS::Interpreter::create<ReplObject>(*vm);
         ReplConsoleClient console_client(interpreter->global_object().console());
@@ -1003,7 +1036,7 @@ int main(int argc, char** argv)
                     if (key.view().starts_with(property_pattern)) {
                         Line::CompletionSuggestion completion { key, Line::CompletionSuggestion::ForSearch };
                         if (!results.contains_slow(completion)) { // hide duplicates
-                            results.append(key);
+                            results.append(String(key));
                         }
                     }
                 }
@@ -1058,21 +1091,25 @@ int main(int argc, char** argv)
             sigint_handler();
         });
 
-        auto file = Core::File::construct(script_path);
-        if (!file->open(Core::OpenMode::ReadOnly)) {
-            warnln("Failed to open {}: {}", script_path, file->error_string());
-            return 1;
-        }
-        auto file_contents = file->read_all();
+        StringBuilder builder;
+        for (auto& path : script_paths) {
+            auto file = Core::File::construct(path);
+            if (!file->open(Core::OpenMode::ReadOnly)) {
+                warnln("Failed to open {}: {}", path, file->error_string());
+                return 1;
+            }
+            auto file_contents = file->read_all();
 
-        StringView source;
-        if (file_has_shebang(file_contents)) {
-            source = strip_shebang(file_contents);
-        } else {
-            source = file_contents;
+            StringView source;
+            if (file_has_shebang(file_contents)) {
+                source = strip_shebang(file_contents);
+            } else {
+                source = file_contents;
+            }
+            builder.append(source);
         }
 
-        if (!parse_and_run(*interpreter, source))
+        if (!parse_and_run(*interpreter, builder.to_string()))
             return 1;
     }
 

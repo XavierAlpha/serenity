@@ -260,7 +260,10 @@ void StringLiteral::generate_bytecode(Bytecode::Generator& generator) const
 
 void Identifier::generate_bytecode(Bytecode::Generator& generator) const
 {
-    generator.emit<Bytecode::Op::GetVariable>(generator.intern_string(m_string));
+    if (m_argument_index.has_value())
+        generator.emit<Bytecode::Op::LoadArgument>(m_argument_index.value());
+    else
+        generator.emit<Bytecode::Op::GetVariable>(generator.intern_string(m_string));
 }
 
 void AssignmentExpression::generate_bytecode(Bytecode::Generator& generator) const
@@ -718,6 +721,9 @@ void YieldExpression::generate_bytecode(Bytecode::Generator& generator) const
 {
     VERIFY(generator.is_in_generator_function());
 
+    if (m_is_yield_from)
+        TODO();
+
     if (m_argument)
         m_argument->generate_bytecode(generator);
 
@@ -985,8 +991,11 @@ void TryStatement::generate_bytecode(Bytecode::Generator& generator) const
         }
     }
 
+    auto& target_block = generator.make_block();
     generator.switch_to_basic_block(saved_block);
-    generator.emit<Bytecode::Op::EnterUnwindContext>(handler_target, finalizer_target);
+    generator.emit<Bytecode::Op::EnterUnwindContext>(Bytecode::Label { target_block }, handler_target, finalizer_target);
+
+    generator.switch_to_basic_block(target_block);
     m_block->generate_bytecode(generator);
     if (m_finalizer && !generator.is_current_block_terminated())
         generator.emit<Bytecode::Op::Jump>(finalizer_target);

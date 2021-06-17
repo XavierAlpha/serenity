@@ -4,6 +4,7 @@ Please make sure to keep this list up to date when adding and updating ports. :^
 
 | Port                                   | Name                                                       | Version                  | Website                                                                        |
 |----------------------------------------|------------------------------------------------------------|--------------------------|--------------------------------------------------------------------------------|
+| [`Another-World`](Another-World/)      | Another World Bytecode Interpreter                         |                          | https://github.com/fabiensanglard/Another-World-Bytecode-Interpreter           |
 | [`bash`](bash/)                        | GNU Bash                                                   | 5.0                      | https://www.gnu.org/software/bash/                                             |
 | [`bass`](bass/)                        | Beneath a Steel Sky                                        | cd-1.2                   | https://www.scummvm.org/games                                                  |
 | [`bc`](bc/)                            | bc                                                         | 2.5.1                    | https://github.com/gavinhoward/bc                                              |
@@ -17,13 +18,15 @@ Please make sure to keep this list up to date when adding and updating ports. :^
 | [`chester`](chester/)                  | Chester Gameboy Emulator                                   |                          | https://github.com/veikkos/chester                                             |
 | [`cmake`](cmake/)                      | CMake                                                      | 3.19.4                   | https://cmake.org/                                                             |
 | [`cmatrix`](cmatrix/)                  | cmatrix                                                    |                          | https://github.com/abishekvashok/cmatrix                                       |
+| [`composer`](composer/)                | Composer                                                   | 2.1.3                    | https://getcomposer.org/                                                       |
 | [`curl`](curl/)                        | curl                                                       | 7.77.0                   | https://curl.se/                                                               |
 | [`dash`](dash/)                        | DASH                                                       | 0.5.10.2                 | http://gondor.apana.org.au/~herbert/dash                                       |
 | [`dialog`](dialog/)                    | Dialog                                                     | 1.3-20210324             | https://invisible-island.net/dialog/                                           |
-| [`diffutils`](diffutils/)              | GNU Diffutils                                              | 3.5                      | https://www.gnu.org/software/diffutils/                                        |
+| [`diffutils`](diffutils/)              | GNU Diffutils                                              | 3.7                      | https://www.gnu.org/software/diffutils/                                        |
 | [`dmidecode`](dmidecode/)              | dmidecode                                                  | 3.3                      | https://github.com/mirror/dmidecode                                            |
 | [`doom`](doom/)                        | DOOM                                                       |                          | https://github.com/SerenityOS/SerenityDOOM                                     |
 | [`dropbear`](dropbear/)                | Dropbear SSH                                               | 2019.78                  | https://dropbear.nl/mirror/dropbear.html                                       |
+| [`dungeonrush`](dungeonrush/)          | DungeonRush                                                | 1.1-beta                 | https://github.com/Rapiz1/DungeonRush                                          |
 | [`ed`](ed/)                            | GNU ed                                                     | 1.15                     | https://www.gnu.org/software/ed/                                               |
 | [`emu2`](emu2/)                        | emu2 DOS emulator                                          | 2021.01                  | https://github.com/dmsc/emu2                                                   |
 | [`figlet`](figlet/)                    | FIGlet                                                     | 2.2.5                    | http://www.figlet.org/                                                         |
@@ -121,6 +124,7 @@ Please make sure to keep this list up to date when adding and updating ports. :^
 | [`SDL2_gfx`](SDL2_gfx/)                | SDL2\_gfx (Graphics primitives add-on for SDL2)            | 1.0.4                    | https://sourceforge.net/projects/sdl2gfx/                                      |
 | [`SDL2_image`](SDL2_image/)            | SDL2\_image (Image loading add-on for SDL2)                | 2.0.5                    | https://www.libsdl.org/projects/SDL_image/                                     |
 | [`SDL2_mixer`](SDL2_mixer/)            | SDL2\_mixer (audio mixer add-on for SDL2)                  | 2.0.4                    | https://www.libsdl.org/projects/SDL_mixer/                                     |
+| [`SDL2_net`](SDL2_net/)                | SDL2\_net (network add-on for SDL2)                        | 2.0.1                    | https://www.libsdl.org/projects/SDL_net/                                       |
 | [`SDL2_ttf`](SDL2_ttf/)                | SDL2\_ttf (TrueType Font add-on for SDL2)                  | 2.0.15                   | https://www.libsdl.org/projects/SDL_ttf/                                       |
 | [`sed`](sed/)                          | GNU sed                                                    | 4.2.1                    | https://www.gnu.org/software/sed/                                              |
 | [`sl`](sl/)                            | Steam Locomotive (SL)                                      |                          | https://github.com/mtoyoda/sl                                                  |

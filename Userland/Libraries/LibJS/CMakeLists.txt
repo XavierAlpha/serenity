@@ -6,6 +6,11 @@ set(SOURCES
     Bytecode/Instruction.cpp
     Bytecode/Interpreter.cpp
     Bytecode/Op.cpp
+    Bytecode/Pass/DumpCFG.cpp
+    Bytecode/Pass/GenerateCFG.cpp
+    Bytecode/Pass/MergeBlocks.cpp
+    Bytecode/Pass/PlaceBlocks.cpp
+    Bytecode/Pass/UnifySameBlocks.cpp
     Bytecode/StringTable.cpp
     Console.cpp
     Heap/CellAllocator.cpp
@@ -37,6 +42,9 @@ set(SOURCES
     Runtime/BooleanPrototype.cpp
     Runtime/BoundFunction.cpp
     Runtime/ConsoleObject.cpp
+    Runtime/DataView.cpp
+    Runtime/DataViewConstructor.cpp
+    Runtime/DataViewPrototype.cpp
     Runtime/DateConstructor.cpp
     Runtime/Date.cpp
     Runtime/DatePrototype.cpp
@@ -45,6 +53,9 @@ set(SOURCES
     Runtime/ErrorPrototype.cpp
     Runtime/ErrorTypes.cpp
     Runtime/Exception.cpp
+    Runtime/FinalizationRegistry.cpp
+    Runtime/FinalizationRegistryConstructor.cpp
+    Runtime/FinalizationRegistryPrototype.cpp
     Runtime/FunctionConstructor.cpp
     Runtime/Function.cpp
     Runtime/FunctionPrototype.cpp

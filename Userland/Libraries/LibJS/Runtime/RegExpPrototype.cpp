@@ -32,12 +32,11 @@ void RegExpPrototype::initialize(GlobalObject& global_object)
     define_native_function(vm.well_known_symbol_match(), symbol_match, 1, attr);
     define_native_function(vm.well_known_symbol_replace(), symbol_replace, 2, attr);
 
-    u8 readable_attr = Attribute::Configurable;
-    define_native_property(vm.names.flags, flags, {}, readable_attr);
-    define_native_property(vm.names.source, source, {}, readable_attr);
+    define_native_accessor(vm.names.flags, flags, {}, Attribute::Configurable);
+    define_native_accessor(vm.names.source, source, {}, Attribute::Configurable);
 
 #define __JS_ENUMERATE(flagName, flag_name, flag_char, ECMAScriptFlagName) \
-    define_native_property(vm.names.flagName, flag_name, {}, readable_attr);
+    define_native_accessor(vm.names.flagName, flag_name, {}, Attribute::Configurable);
     JS_ENUMERATE_REGEXP_FLAGS
 #undef __JS_ENUMERATE
 }
@@ -192,7 +191,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::exec)
 
     Value groups = js_undefined();
     if (result.n_named_capture_groups > 0) {
-        auto groups_object = create_empty(global_object);
+        auto groups_object = Object::create(global_object, nullptr);
         for (auto& entry : result.named_capture_group_matches[0])
             groups_object->define_property(entry.key, js_string(vm, entry.value.view.to_string()));
         groups = move(groups_object);
