@@ -86,10 +86,11 @@ list(REMOVE_ITEM LIBSQL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libr
 file(GLOB LIBSQL_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibSQL/*.cpp")
 file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
 file(GLOB LIBIMAP_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibIMAP/*.cpp")
-
 file(GLOB LIBTEST_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibTest/*.cpp")
 list(FILTER LIBTEST_SOURCES EXCLUDE REGEX ".*Main.cpp$")
 file(GLOB LIBTEST_MAIN CONFIGURE_DEPENDS "../../Userland/Libraries/LibTest/TestMain.cpp")
+file(GLOB LIBCRYPTO_TESTS CONFIGURE_DEPENDS "../../Tests/LibCrypto/*.cpp")
+file(GLOB LIBTLS_TESTS CONFIGURE_DEPENDS "../../Tests/LibTLS/*.cpp")
 
 set(LAGOM_REGEX_SOURCES ${LIBREGEX_LIBC_SOURCES} ${LIBREGEX_SOURCES})
 set(LAGOM_CORE_SOURCES ${AK_SOURCES} ${LIBCORE_SOURCES})
@@ -201,6 +202,28 @@ if (BUILD_LAGOM)
         target_link_libraries(wasm_lagom Lagom)
         target_link_libraries(wasm_lagom stdc++)
 
+        foreach(source ${LIBCRYPTO_TESTS})
+            get_filename_component(name ${source} NAME_WE)
+            add_executable(${name}_lagom ${source} ${LIBCRYPTO_SOURCES} ${LIBTEST_MAIN})
+            target_link_libraries(${name}_lagom Lagom LagomTest)
+            add_test(
+                    NAME ${name}_lagom
+                    COMMAND ${name}_lagom
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            )
+        endforeach()
+
+        foreach(source ${LIBTLS_TESTS})
+            get_filename_component(name ${source} NAME_WE)
+            add_executable(${name}_lagom ${source} ${LIBTLS_SOURCES} ${LIBTEST_MAIN})
+            target_link_libraries(${name}_lagom Lagom LagomTest)
+            add_test(
+                    NAME ${name}_lagom
+                    COMMAND ${name}_lagom
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibTLS
+            )
+        endforeach()
+
         foreach(TEST_PATH ${SHELL_TESTS})
             get_filename_component(TEST_NAME ${TEST_PATH} NAME_WE)
             add_test(
@@ -260,6 +283,8 @@ if (BUILD_LAGOM)
             )
         endforeach()
     endif()
+
+    install(TARGETS Lagom LagomCore)
 endif()
 
 if (ENABLE_FUZZER_SANITIZER OR ENABLE_OSS_FUZZ)

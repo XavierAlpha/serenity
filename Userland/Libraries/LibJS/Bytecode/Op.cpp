@@ -6,13 +6,16 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashTable.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/GlobalObject.h>
+#include <LibJS/Runtime/IteratorOperations.h>
 #include <LibJS/Runtime/LexicalEnvironment.h>
+#include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/Runtime/ScopeObject.h>
 #include <LibJS/Runtime/ScriptFunction.h>
 #include <LibJS/Runtime/Value.h>
@@ -123,6 +126,40 @@ void NewArray::execute_impl(Bytecode::Interpreter& interpreter) const
     interpreter.accumulator() = Array::create_from(interpreter.global_object(), elements);
 }
 
+void IteratorToArray::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& global_object = interpreter.global_object();
+    auto& vm = interpreter.vm();
+    auto iterator = interpreter.accumulator().to_object(global_object);
+    if (vm.exception())
+        return;
+
+    auto array = Array::create(global_object);
+    size_t index = 0;
+
+    while (true) {
+        auto iterator_result = iterator_next(*iterator);
+        if (!iterator_result)
+            return;
+
+        auto complete = iterator_complete(global_object, *iterator_result);
+        if (vm.exception())
+            return;
+
+        if (complete) {
+            interpreter.accumulator() = array;
+            return;
+        }
+
+        auto value = iterator_value(global_object, *iterator_result);
+        if (vm.exception())
+            return;
+
+        array->put(index, value);
+        index++;
+    }
+}
+
 void NewString::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.accumulator() = js_string(interpreter.vm(), interpreter.current_executable().get_string(m_string));
@@ -131,6 +168,44 @@ void NewString::execute_impl(Bytecode::Interpreter& interpreter) const
 void NewObject::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.accumulator() = Object::create(interpreter.global_object(), interpreter.global_object().object_prototype());
+}
+
+void NewRegExp::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto source = interpreter.current_executable().get_string(m_source_index);
+    auto flags = interpreter.current_executable().get_string(m_flags_index);
+
+    interpreter.accumulator() = RegExpObject::create(interpreter.global_object(), source, flags);
+}
+
+void CopyObjectExcludingProperties::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto* from_object = interpreter.reg(m_from_object).to_object(interpreter.global_object());
+    if (interpreter.vm().exception())
+        return;
+
+    auto* to_object = Object::create(interpreter.global_object(), interpreter.global_object().object_prototype());
+
+    HashTable<Value, ValueTraits> excluded_names;
+    for (size_t i = 0; i < m_excluded_names_count; ++i) {
+        excluded_names.set(interpreter.reg(m_excluded_names[i]));
+        if (interpreter.vm().exception())
+            return;
+    }
+
+    auto own_keys = from_object->get_own_properties(Object::PropertyKind::Key, true);
+
+    for (auto& key : own_keys) {
+        if (!excluded_names.contains(key)) {
+            auto property_name = PropertyName(key.to_property_key(interpreter.global_object()));
+            auto property_value = from_object->get(property_name);
+            if (interpreter.vm().exception())
+                return;
+            to_object->define_property(property_name, property_value);
+        }
+    }
+
+    interpreter.accumulator() = to_object;
 }
 
 void ConcatString::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -151,7 +226,7 @@ void SetVariable::execute_impl(Bytecode::Interpreter& interpreter) const
 void GetById::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     if (auto* object = interpreter.accumulator().to_object(interpreter.global_object()))
-        interpreter.accumulator() = object->get(interpreter.current_executable().get_string(m_property));
+        interpreter.accumulator() = object->get(interpreter.current_executable().get_string(m_property)).value_or(js_undefined());
 }
 
 void PutById::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -190,6 +265,17 @@ void JumpNullish::execute_impl(Bytecode::Interpreter& interpreter) const
     VERIFY(m_false_target.has_value());
     auto result = interpreter.accumulator();
     if (result.is_nullish())
+        interpreter.jump(m_true_target.value());
+    else
+        interpreter.jump(m_false_target.value());
+}
+
+void JumpUndefined::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    VERIFY(m_true_target.has_value());
+    VERIFY(m_false_target.has_value());
+    auto result = interpreter.accumulator();
+    if (result.is_undefined())
         interpreter.jump(m_true_target.value());
     else
         interpreter.jump(m_false_target.value());
@@ -328,7 +414,7 @@ void GetByValue::execute_impl(Bytecode::Interpreter& interpreter) const
         auto property_key = interpreter.accumulator().to_property_key(interpreter.global_object());
         if (interpreter.vm().exception())
             return;
-        interpreter.accumulator() = object->get(property_key);
+        interpreter.accumulator() = object->get(property_key).value_or(js_undefined());
     }
 }
 
@@ -345,6 +431,29 @@ void PutByValue::execute_impl(Bytecode::Interpreter& interpreter) const
 void LoadArgument::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.accumulator() = interpreter.vm().argument(m_index);
+}
+
+void GetIterator::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    interpreter.accumulator() = get_iterator(interpreter.global_object(), interpreter.accumulator());
+}
+
+void IteratorNext::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    if (auto* object = interpreter.accumulator().to_object(interpreter.global_object()))
+        interpreter.accumulator() = iterator_next(*object);
+}
+
+void IteratorResultDone::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    if (auto* iterator_result = interpreter.accumulator().to_object(interpreter.global_object()))
+        interpreter.accumulator() = Value(iterator_complete(interpreter.global_object(), *iterator_result));
+}
+
+void IteratorResultValue::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    if (auto* iterator_result = interpreter.accumulator().to_object(interpreter.global_object()))
+        interpreter.accumulator() = iterator_value(interpreter.global_object(), *iterator_result);
 }
 
 String Load::to_string_impl(Bytecode::Executable const&) const
@@ -383,6 +492,11 @@ String NewArray::to_string_impl(Bytecode::Executable const&) const
     return builder.to_string();
 }
 
+String IteratorToArray::to_string_impl(const Bytecode::Executable&) const
+{
+    return "IteratorToArray";
+}
+
 String NewString::to_string_impl(Bytecode::Executable const& executable) const
 {
     return String::formatted("NewString {} (\"{}\")", m_string, executable.string_table->get(m_string));
@@ -391,6 +505,27 @@ String NewString::to_string_impl(Bytecode::Executable const& executable) const
 String NewObject::to_string_impl(Bytecode::Executable const&) const
 {
     return "NewObject";
+}
+
+String NewRegExp::to_string_impl(Bytecode::Executable const& executable) const
+{
+    return String::formatted("NewRegExp source:{} (\"{}\") flags:{} (\"{}\")", m_source_index, executable.get_string(m_source_index), m_flags_index, executable.get_string(m_flags_index));
+}
+
+String CopyObjectExcludingProperties::to_string_impl(const Bytecode::Executable&) const
+{
+    StringBuilder builder;
+    builder.appendff("CopyObjectExcludingProperties from:{}", m_from_object);
+    if (m_excluded_names_count != 0) {
+        builder.append(" excluding:[");
+        for (size_t i = 0; i < m_excluded_names_count; ++i) {
+            builder.appendff("{}", m_excluded_names[i]);
+            if (i != m_excluded_names_count - 1)
+                builder.append(',');
+        }
+        builder.append(']');
+    }
+    return builder.to_string();
 }
 
 String ConcatString::to_string_impl(Bytecode::Executable const&) const
@@ -437,6 +572,13 @@ String JumpNullish::to_string_impl(Bytecode::Executable const&) const
     auto true_string = m_true_target.has_value() ? String::formatted("{}", *m_true_target) : "<empty>";
     auto false_string = m_false_target.has_value() ? String::formatted("{}", *m_false_target) : "<empty>";
     return String::formatted("JumpNullish null:{} nonnull:{}", true_string, false_string);
+}
+
+String JumpUndefined::to_string_impl(Bytecode::Executable const&) const
+{
+    auto true_string = m_true_target.has_value() ? String::formatted("{}", *m_true_target) : "<empty>";
+    auto false_string = m_false_target.has_value() ? String::formatted("{}", *m_false_target) : "<empty>";
+    return String::formatted("JumpUndefined undefined:{} not undefined:{}", true_string, false_string);
 }
 
 String Call::to_string_impl(Bytecode::Executable const&) const
@@ -532,6 +674,26 @@ String PutByValue::to_string_impl(const Bytecode::Executable&) const
 String LoadArgument::to_string_impl(const Bytecode::Executable&) const
 {
     return String::formatted("LoadArgument {}", m_index);
+}
+
+String GetIterator::to_string_impl(Executable const&) const
+{
+    return "GetIterator";
+}
+
+String IteratorNext::to_string_impl(Executable const&) const
+{
+    return "IteratorNext";
+}
+
+String IteratorResultDone::to_string_impl(Executable const&) const
+{
+    return "IteratorResultDone";
+}
+
+String IteratorResultValue::to_string_impl(Executable const&) const
+{
+    return "IteratorResultValue";
 }
 
 }

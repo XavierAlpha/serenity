@@ -61,6 +61,7 @@ int main(int argc, char** argv)
     auto& toolbox = *main_widget.find_descendant_of_type_named<PixelPaint::ToolboxWidget>("toolbox");
     auto& tab_widget = *main_widget.find_descendant_of_type_named<GUI::TabWidget>("tab_widget");
     tab_widget.set_container_margins({ 4, 4, 5, 5 });
+    tab_widget.set_close_button_enabled(true);
 
     auto& palette_widget = *main_widget.find_descendant_of_type_named<PixelPaint::PaletteWidget>("palette_widget");
 
@@ -191,7 +192,7 @@ int main(int argc, char** argv)
         }
         auto bitmap = editor->active_layer()->try_copy_bitmap(editor->selection());
         if (!bitmap) {
-            dbgln("try_copy() from Layer failed");
+            dbgln("try_copy_bitmap() from Layer failed");
             return;
         }
         GUI::Clipboard::the().set_bitmap(*bitmap);
@@ -522,6 +523,13 @@ int main(int argc, char** argv)
         tab_widget.set_active_widget(&image_editor);
         image_editor.set_focus(true);
         return image_editor;
+    };
+
+    tab_widget.on_tab_close_click = [&](auto& widget) {
+        auto& image_editor = downcast<PixelPaint::ImageEditor>(widget);
+        tab_widget.deferred_invoke([&](auto&) {
+            tab_widget.remove_tab(image_editor);
+        });
     };
 
     tab_widget.on_change = [&](auto& widget) {
