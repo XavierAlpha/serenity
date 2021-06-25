@@ -49,6 +49,8 @@ set(SOURCES
     Runtime/DateConstructor.cpp
     Runtime/Date.cpp
     Runtime/DatePrototype.cpp
+    Runtime/DeclarativeEnvironmentRecord.cpp
+    Runtime/EnvironmentRecord.cpp
     Runtime/ErrorConstructor.cpp
     Runtime/Error.cpp
     Runtime/ErrorPrototype.cpp
@@ -59,17 +61,18 @@ set(SOURCES
     Runtime/FinalizationRegistryPrototype.cpp
     Runtime/FunctionConstructor.cpp
     Runtime/Function.cpp
+    Runtime/FunctionEnvironmentRecord.cpp
     Runtime/FunctionPrototype.cpp
     Runtime/GeneratorFunctionConstructor.cpp
     Runtime/GeneratorFunctionPrototype.cpp
     Runtime/GeneratorObject.cpp
     Runtime/GeneratorObjectPrototype.cpp
+    Runtime/GlobalEnvironmentRecord.cpp
     Runtime/GlobalObject.cpp
     Runtime/IndexedProperties.cpp
     Runtime/IteratorOperations.cpp
     Runtime/IteratorPrototype.cpp
     Runtime/JSONObject.cpp
-    Runtime/LexicalEnvironment.cpp
     Runtime/Map.cpp
     Runtime/MapConstructor.cpp
     Runtime/MapIterator.cpp
@@ -82,8 +85,9 @@ set(SOURCES
     Runtime/NumberConstructor.cpp
     Runtime/NumberObject.cpp
     Runtime/NumberPrototype.cpp
-    Runtime/ObjectConstructor.cpp
     Runtime/Object.cpp
+    Runtime/ObjectConstructor.cpp
+    Runtime/ObjectEnvironmentRecord.cpp
     Runtime/ObjectPrototype.cpp
     Runtime/PrimitiveString.cpp
     Runtime/Promise.cpp
@@ -92,6 +96,7 @@ set(SOURCES
     Runtime/PromisePrototype.cpp
     Runtime/PromiseReaction.cpp
     Runtime/PromiseResolvingFunction.cpp
+    Runtime/PropertyAttributes.cpp
     Runtime/ProxyConstructor.cpp
     Runtime/ProxyObject.cpp
     Runtime/Reference.cpp
@@ -99,7 +104,6 @@ set(SOURCES
     Runtime/RegExpConstructor.cpp
     Runtime/RegExpObject.cpp
     Runtime/RegExpPrototype.cpp
-    Runtime/ScopeObject.cpp
     Runtime/ScriptFunction.cpp
     Runtime/Set.cpp
     Runtime/SetConstructor.cpp
@@ -130,7 +134,6 @@ set(SOURCES
     Runtime/WeakSet.cpp
     Runtime/WeakSetConstructor.cpp
     Runtime/WeakSetPrototype.cpp
-    Runtime/WithScope.cpp
     SyntaxHighlighter.cpp
     Token.cpp
 )

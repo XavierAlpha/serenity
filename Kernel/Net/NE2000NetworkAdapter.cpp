@@ -8,6 +8,7 @@
 #include <Kernel/Debug.h>
 #include <Kernel/IO.h>
 #include <Kernel/Net/NE2000NetworkAdapter.h>
+#include <Kernel/Sections.h>
 
 namespace Kernel {
 
@@ -156,7 +157,7 @@ UNMAP_AFTER_INIT RefPtr<NE2000NetworkAdapter> NE2000NetworkAdapter::try_to_initi
     if (!ne2k_ids.span().contains_slow(id))
         return {};
     u8 irq = PCI::get_interrupt_line(address);
-    return adopt_ref_if_nonnull(new NE2000NetworkAdapter(address, irq));
+    return adopt_ref_if_nonnull(new (nothrow) NE2000NetworkAdapter(address, irq));
 }
 
 UNMAP_AFTER_INIT NE2000NetworkAdapter::NE2000NetworkAdapter(PCI::Address address, u8 irq)

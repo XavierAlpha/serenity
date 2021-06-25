@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <Kernel/Arch/x86/InterruptDisabler.h>
+#include <Kernel/Panic.h>
 #include <Kernel/VM/MemoryManager.h>
 #include <Kernel/VM/ProcessPagingScope.h>
 
@@ -19,7 +21,11 @@ ProcessPagingScope::ProcessPagingScope(Process& process)
 ProcessPagingScope::~ProcessPagingScope()
 {
     InterruptDisabler disabler;
+#if ARCH(I386)
     Thread::current()->tss().cr3 = m_previous_cr3;
+#else
+    PANIC("ProcessPagingScope::~ProcessPagingScope() not implemented");
+#endif
     write_cr3(m_previous_cr3);
 }
 

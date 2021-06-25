@@ -9,6 +9,7 @@
 #include <Kernel/IO.h>
 #include <Kernel/Net/RTL8168NetworkAdapter.h>
 #include <Kernel/PCI/IDs.h>
+#include <Kernel/Sections.h>
 
 namespace Kernel {
 
@@ -183,7 +184,7 @@ UNMAP_AFTER_INIT RefPtr<RTL8168NetworkAdapter> RTL8168NetworkAdapter::try_to_ini
     if (id.device_id != 0x8168)
         return {};
     u8 irq = PCI::get_interrupt_line(address);
-    return adopt_ref_if_nonnull(new RTL8168NetworkAdapter(address, irq));
+    return adopt_ref_if_nonnull(new (nothrow) RTL8168NetworkAdapter(address, irq));
 }
 
 UNMAP_AFTER_INIT RTL8168NetworkAdapter::RTL8168NetworkAdapter(PCI::Address address, u8 irq)

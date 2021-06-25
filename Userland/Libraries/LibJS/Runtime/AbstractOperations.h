@@ -13,6 +13,10 @@
 
 namespace JS {
 
+DeclarativeEnvironmentRecord* new_declarative_environment(EnvironmentRecord&);
+ObjectEnvironmentRecord* new_object_environment(Object&, bool is_with_environment, EnvironmentRecord*);
+EnvironmentRecord& get_this_environment(VM&);
+Object* get_super_constructor(VM&);
 Value require_object_coercible(GlobalObject&, Value);
 Function* get_method(GlobalObject& global_object, Value, PropertyName const&);
 size_t length_of_array_like(GlobalObject&, Object const&);
@@ -20,6 +24,16 @@ MarkedValueList create_list_from_array_like(GlobalObject&, Value, AK::Function<R
 Function* species_constructor(GlobalObject&, Object const&, Function& default_constructor);
 GlobalObject* get_function_realm(GlobalObject&, Function const&);
 Object* get_prototype_from_constructor(GlobalObject&, Function const& constructor, Object* (GlobalObject::*intrinsic_default_prototype)());
+
+enum class CallerMode {
+    Strict,
+    NonStrict
+};
+enum class EvalMode {
+    Direct,
+    Indirect
+};
+Value perform_eval(Value, GlobalObject&, CallerMode, EvalMode);
 
 // 10.1.13 OrdinaryCreateFromConstructor ( constructor, intrinsicDefaultProto [ , internalSlotsList ] ), https://tc39.es/ecma262/#sec-ordinarycreatefromconstructor
 template<typename T, typename... Args>

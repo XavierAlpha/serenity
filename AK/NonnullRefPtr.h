@@ -12,7 +12,8 @@
 #include <AK/Traits.h>
 #include <AK/Types.h>
 #ifdef KERNEL
-#    include <Kernel/Arch/x86/CPU.h>
+#    include <Kernel/Arch/x86/Processor.h>
+#    include <Kernel/Arch/x86/ScopedCritical.h>
 #endif
 
 namespace AK {
@@ -334,6 +335,12 @@ inline void swap(NonnullRefPtr<T>& a, NonnullRefPtr<U>& b)
     a.swap(b);
 }
 
+template<typename T, class... Args>
+inline NonnullRefPtr<T> create(Args&&... args)
+{
+    return NonnullRefPtr<T>(NonnullRefPtr<T>::Adopt, *new T(forward<Args>(args)...));
+}
+
 }
 
 template<typename T>
@@ -345,4 +352,5 @@ struct Traits<NonnullRefPtr<T>> : public GenericTraits<NonnullRefPtr<T>> {
 };
 
 using AK::adopt_ref;
+using AK::create;
 using AK::NonnullRefPtr;

@@ -113,7 +113,7 @@ jobs:
       run: |
         mkdir -p Build
         cd Build
-        cmake .. -GNinja -DBUILD_LAGOM=ON -DENABLE_ALL_DEBUG_FACILITIES=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10
+        cmake .. -GNinja -DBUILD_LAGOM=ON -DENABLE_ALL_DEBUG_FACILITIES=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DENABLE_USB_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10
       if: ${{ matrix.debug-options == 'ALL_DEBUG' }}
     - name: Create build environment
       working-directory: ${{ github.workspace }}
@@ -122,7 +122,7 @@ jobs:
       run: |
         mkdir -p Build
         cd Build
-        cmake .. -GNinja -DENABLE_UNDEFINED_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10
+        cmake .. -GNinja -DENABLE_UNDEFINED_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DENABLE_USB_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10
       if: ${{ matrix.debug-options == 'NORMAL_DEBUG' }}
 
     # === ACTUALLY BUILD ===
@@ -196,15 +196,15 @@ jobs:
       run: |
         sudo apt-get purge -y clang-11
         sudo apt-get update
-        sudo apt-get install ninja-build binaryen
+        sudo apt-get install ninja-build wabt
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-12 100
       if: ${{ runner.os == 'Linux' }}
     - name: Install macOS dependencies
-      run: brew install ninja binaryen
+      run: brew install ninja wabt
       if: ${{ runner.os == 'macOS' }}
     - name: Check versions
-      run: set +e; clang --version; clang++ --version; ninja --version; wasm-as --version
+      run: set +e; clang --version; clang++ --version; ninja --version; wat2wasm --version
 
     # === PREPARE FOR BUILDING ===
 
@@ -217,7 +217,7 @@ jobs:
       run: |
         mkdir -p Build
         cd Build
-        cmake -GNinja -DBUILD_LAGOM=ON -DENABLE_FUZZER_SANITIZER=ON -DENABLE_ADDRESS_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ..
+        cmake -GNinja -DBUILD_LAGOM=ON -DENABLE_FUZZER_SANITIZER=ON -DENABLE_ADDRESS_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DENABLE_USB_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ..
       if: ${{ matrix.with-fuzzers == 'FUZZ' }}
 
     - name: Create build environment (no fuzz)
@@ -225,7 +225,7 @@ jobs:
       run: |
         mkdir -p Build
         cd Build
-        cmake -GNinja -DBUILD_LAGOM=ON -DINCLUDE_WASM_SPEC_TESTS=ON -DWASM_SPEC_TEST_SKIP_FORMATTING=ON -DENABLE_UNDEFINED_SANITIZER=ON -DENABLE_ADDRESS_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10 ..
+        cmake -GNinja -DBUILD_LAGOM=ON -DINCLUDE_WASM_SPEC_TESTS=ON -DWASM_SPEC_TEST_SKIP_FORMATTING=ON -DENABLE_UNDEFINED_SANITIZER=ON -DENABLE_ADDRESS_SANITIZER=ON -DENABLE_PCI_IDS_DOWNLOAD=OFF -DENABLE_USB_IDS_DOWNLOAD=OFF -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10 ..
       if: ${{ matrix.with-fuzzers == 'NO_FUZZ' }}
 
     # === ACTUALLY BUILD AND TEST ===

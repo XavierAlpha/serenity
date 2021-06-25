@@ -44,13 +44,18 @@ static bool matches(const CSS::Selector::SimpleSelector& component, const DOM::E
     case CSS::Selector::SimpleSelector::PseudoClass::Visited:
         // FIXME: Maybe match this selector sometimes?
         return false;
+    case CSS::Selector::SimpleSelector::PseudoClass::Active:
+        if (!element.is_active())
+            return false;
+        break;
     case CSS::Selector::SimpleSelector::PseudoClass::Hover:
         if (!matches_hover_pseudo_class(element))
             return false;
         break;
     case CSS::Selector::SimpleSelector::PseudoClass::Focus:
-        // FIXME: Implement matches_focus_pseudo_class(element)
-        return false;
+        if (!element.is_focused())
+            return false;
+        break;
     case CSS::Selector::SimpleSelector::PseudoClass::FirstChild:
         if (element.previous_element_sibling())
             return false;
@@ -212,7 +217,7 @@ static bool matches(const CSS::Selector& selector, int component_list_index, con
         for (auto* ancestor = element.parent(); ancestor; ancestor = ancestor->parent()) {
             if (!is<DOM::Element>(*ancestor))
                 continue;
-            if (matches(selector, component_list_index - 1, downcast<DOM::Element>(*ancestor)))
+            if (matches(selector, component_list_index - 1, verify_cast<DOM::Element>(*ancestor)))
                 return true;
         }
         return false;
@@ -220,7 +225,7 @@ static bool matches(const CSS::Selector& selector, int component_list_index, con
         VERIFY(component_list_index != 0);
         if (!element.parent() || !is<DOM::Element>(*element.parent()))
             return false;
-        return matches(selector, component_list_index - 1, downcast<DOM::Element>(*element.parent()));
+        return matches(selector, component_list_index - 1, verify_cast<DOM::Element>(*element.parent()));
     case CSS::Selector::ComplexSelector::Relation::AdjacentSibling:
         VERIFY(component_list_index != 0);
         if (auto* sibling = element.previous_element_sibling())

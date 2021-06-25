@@ -13,6 +13,8 @@
 
 namespace Web::Bindings {
 
+class WebAssemblyMemoryObject;
+
 class WebAssemblyObject final : public JS::Object {
     JS_OBJECT(WebAssemblyObject, JS::Object);
 
@@ -20,6 +22,8 @@ public:
     explicit WebAssemblyObject(JS::GlobalObject&);
     virtual void initialize(JS::GlobalObject&) override;
     virtual ~WebAssemblyObject() override = default;
+
+    virtual void visit_edges(Cell::Visitor&) override;
 
     struct CompiledWebAssemblyModule {
         explicit CompiledWebAssemblyModule(Wasm::Module&& module)
@@ -34,8 +38,18 @@ public:
     //        but the module needs to stick around while its instance is alive
     //        so ideally this would be a refcounted object, shared between
     //        WebAssemblyModuleObject's and WebAssemblyInstantiatedModuleObject's.
+    struct ModuleCache {
+        HashMap<Wasm::FunctionAddress, JS::Function*> function_instances;
+        HashMap<Wasm::MemoryAddress, WebAssemblyMemoryObject*> memory_instances;
+    };
+    struct GlobalModuleCache {
+        HashMap<Wasm::FunctionAddress, JS::NativeFunction*> function_instances;
+    };
+
     static NonnullOwnPtrVector<CompiledWebAssemblyModule> s_compiled_modules;
     static NonnullOwnPtrVector<Wasm::ModuleInstance> s_instantiated_modules;
+    static Vector<ModuleCache> s_module_caches;
+    static GlobalModuleCache s_global_cache;
 
     static Wasm::AbstractMachine s_abstract_machine;
 
@@ -69,6 +83,7 @@ public:
 
     size_t index() const { return m_index; }
     Wasm::ModuleInstance& instance() const { return WebAssemblyObject::s_instantiated_modules.at(m_index); }
+    auto& cache() { return WebAssemblyObject::s_module_caches.at(m_index); }
 
     void visit_edges(Cell::Visitor&) override;
 
@@ -80,19 +95,15 @@ private:
 };
 
 class WebAssemblyMemoryObject final : public JS::Object {
-    JS_OBJECT(WebAssemblyModuleObject, JS::Object);
+    JS_OBJECT(WebAssemblyMemoryObject, JS::Object);
 
 public:
     explicit WebAssemblyMemoryObject(JS::GlobalObject&, Wasm::MemoryAddress);
-    virtual void initialize(JS::GlobalObject&) override;
     virtual ~WebAssemblyMemoryObject() override = default;
 
     auto address() const { return m_address; }
 
 private:
-    JS_DECLARE_NATIVE_FUNCTION(grow);
-    JS_DECLARE_NATIVE_GETTER(buffer);
-
     Wasm::MemoryAddress m_address;
 };
 

@@ -81,8 +81,8 @@ file(GLOB LIBTEXTCODEC_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibTe
 file(GLOB SHELL_SOURCES CONFIGURE_DEPENDS "../../Userland/Shell/*.cpp")
 file(GLOB SHELL_TESTS CONFIGURE_DEPENDS "../../Userland/Shell/Tests/*.sh")
 list(FILTER SHELL_SOURCES EXCLUDE REGEX ".*main.cpp$")
-file(GLOB LIBSQL_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibSQL/*.cpp")
-list(REMOVE_ITEM LIBSQL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibSQL/SyntaxHighlighter.cpp")
+file(GLOB_RECURSE LIBSQL_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibSQL/*.cpp")
+list(REMOVE_ITEM LIBSQL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../Userland/Libraries/LibSQL/AST/SyntaxHighlighter.cpp")
 file(GLOB LIBSQL_TEST_SOURCES CONFIGURE_DEPENDS "../../Tests/LibSQL/*.cpp")
 file(GLOB LIBWASM_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibWasm/*/*.cpp")
 file(GLOB LIBIMAP_SOURCES CONFIGURE_DEPENDS "../../Userland/Libraries/LibIMAP/*.cpp")
@@ -196,6 +196,17 @@ if (BUILD_LAGOM)
         set_target_properties(sql_lagom PROPERTIES OUTPUT_NAME sql)
         target_link_libraries(sql_lagom Lagom)
         target_link_libraries(sql_lagom stdc++)
+
+        add_executable(test-iodevice ../../Tests/LibCore/TestLibCoreIODevice.cpp ${LIBTEST_MAIN})
+        set_target_properties(test-iodevice PROPERTIES OUTPUT_NAME test-iodevice)
+        target_link_libraries(test-iodevice Lagom)
+        target_link_libraries(test-iodevice LagomTest)
+        target_link_libraries(test-iodevice stdc++)
+        add_test(
+            NAME test-iodevice
+            COMMAND test-iodevice
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../Tests/LibCore
+        )
 
         add_executable(wasm_lagom ../../Userland/Utilities/wasm.cpp)
         set_target_properties(wasm_lagom PROPERTIES OUTPUT_NAME wasm)

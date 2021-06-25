@@ -12,7 +12,6 @@
 #include <AK/Assertions.h>
 #include <AK/NonnullOwnPtrVector.h>
 #include <AK/Types.h>
-#include <Kernel/Arch/x86/CPU.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Heap/Heap.h>
 #include <Kernel/Heap/kmalloc.h>
@@ -21,6 +20,7 @@
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
 #include <Kernel/Scheduler.h>
+#include <Kernel/Sections.h>
 #include <Kernel/SpinLock.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/VM/MemoryManager.h>
@@ -28,6 +28,10 @@
 #define CHUNK_SIZE 32
 #define POOL_SIZE (2 * MiB)
 #define ETERNAL_RANGE_SIZE (2 * MiB)
+
+namespace std {
+const nothrow_t nothrow;
+}
 
 static RecursiveSpinLock s_lock; // needs to be recursive because of dump_backtrace()
 
@@ -300,12 +304,26 @@ size_t kmalloc_good_size(size_t size)
     return size;
 }
 
-void* operator new(size_t size) noexcept
+void* operator new(size_t size)
+{
+    void* ptr = kmalloc(size);
+    VERIFY(ptr);
+    return ptr;
+}
+
+void* operator new(size_t size, const std::nothrow_t&) noexcept
 {
     return kmalloc(size);
 }
 
-void* operator new[](size_t size) noexcept
+void* operator new[](size_t size)
+{
+    void* ptr = kmalloc(size);
+    VERIFY(ptr);
+    return ptr;
+}
+
+void* operator new[](size_t size, const std::nothrow_t&) noexcept
 {
     return kmalloc(size);
 }

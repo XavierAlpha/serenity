@@ -339,6 +339,11 @@ void TerminalWidget::paint_event(GUI::PaintEvent& event)
             if ((!visual_beep_active && !has_only_one_background_color) || should_reverse_fill_for_cursor_or_selection)
                 painter.clear_rect(cell_rect, terminal_color_to_rgb(should_reverse_fill_for_cursor_or_selection ? attribute.effective_foreground_color() : attribute.effective_background_color()));
 
+            if constexpr (TERMINAL_DEBUG) {
+                if (line.termination_column() == column)
+                    painter.clear_rect(cell_rect, Gfx::Color::Magenta);
+            }
+
             enum class UnderlineStyle {
                 None,
                 Dotted,
@@ -592,8 +597,9 @@ VT::Position TerminalWidget::buffer_position_at(const Gfx::IntPoint& position) c
         column = 0;
     if (row >= m_terminal.rows())
         row = m_terminal.rows() - 1;
-    if (column >= m_terminal.columns())
-        column = m_terminal.columns() - 1;
+    auto& line = m_terminal.line(row);
+    if (column >= (int)line.length())
+        column = line.length() - 1;
     row += m_scrollbar->value();
     return { row, column };
 }
@@ -736,7 +742,7 @@ void TerminalWidget::doubleclick_event(GUI::MouseEvent& event)
             start_column = column;
         }
 
-        for (int column = position.column(); column < m_terminal.columns() && (line.code_point(column) == ' ') == want_whitespace; ++column) {
+        for (int column = position.column(); column < (int)line.length() && (line.code_point(column) == ' ') == want_whitespace; ++column) {
             end_column = column;
         }
 

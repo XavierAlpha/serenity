@@ -10,6 +10,7 @@
 #include <Kernel/Debug.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/Process.h>
+#include <Kernel/Sections.h>
 #include <LibC/errno_numbers.h>
 
 namespace Kernel {
@@ -40,7 +41,7 @@ KResultOr<NonnullRefPtr<FileDescription>> PTYMultiplexer::open(int options)
     if (m_freelist.is_empty())
         return EBUSY;
     auto master_index = m_freelist.take_last();
-    auto master = adopt_ref_if_nonnull(new MasterPTY(master_index));
+    auto master = try_create<MasterPTY>(master_index);
     if (!master)
         return ENOMEM;
     dbgln_if(PTMX_DEBUG, "PTYMultiplexer::open: Vending master {}", master->index());

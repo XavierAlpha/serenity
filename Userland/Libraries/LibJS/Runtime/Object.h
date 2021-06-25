@@ -99,7 +99,7 @@ public:
 
     void define_properties(Value properties);
 
-    virtual bool delete_property(const PropertyName&);
+    virtual bool delete_property(PropertyName const&, bool force_throw_exception = false);
 
     virtual bool is_array() const { return false; }
     virtual bool is_function() const { return false; }
@@ -108,7 +108,6 @@ public:
     virtual bool is_global_object() const { return false; }
     virtual bool is_proxy_object() const { return false; }
     virtual bool is_native_function() const { return false; }
-    virtual bool is_lexical_environment() const { return false; }
 
     // B.3.7 The [[IsHTMLDDA]] Internal Slot, https://tc39.es/ecma262/#sec-IsHTMLDDA-internal-slot
     virtual bool is_htmldda() const { return false; }

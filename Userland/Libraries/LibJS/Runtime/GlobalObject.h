@@ -7,13 +7,13 @@
 #pragma once
 
 #include <LibJS/Heap/Heap.h>
-#include <LibJS/Runtime/ScopeObject.h>
+#include <LibJS/Runtime/EnvironmentRecord.h>
 #include <LibJS/Runtime/VM.h>
 
 namespace JS {
 
-class GlobalObject : public ScopeObject {
-    JS_OBJECT(GlobalObject, ScopeObject);
+class GlobalObject : public Object {
+    JS_OBJECT(GlobalObject, Object);
 
 public:
     explicit GlobalObject();
@@ -21,11 +21,7 @@ public:
 
     virtual ~GlobalObject() override;
 
-    virtual Optional<Variable> get_from_scope(const FlyString&) const override;
-    virtual void put_to_scope(const FlyString&, Variable) override;
-    virtual bool delete_from_scope(FlyString const&) override;
-    virtual bool has_this_binding() const override;
-    virtual Value get_this_binding(GlobalObject&) const override;
+    GlobalEnvironmentRecord& environment_record() { return *m_environment_record; }
 
     Console& console() { return *m_console; }
 
@@ -39,6 +35,8 @@ public:
 
     // Not included in JS_ENUMERATE_NATIVE_OBJECTS due to missing distinct constructor
     GeneratorObjectPrototype* generator_object_prototype() { return m_generator_object_prototype; }
+
+    Function* eval_function() const { return m_eval_function; }
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     ConstructorName* snake_name##_constructor() { return m_##snake_name##_constructor; } \
@@ -87,6 +85,8 @@ private:
     // Not included in JS_ENUMERATE_NATIVE_OBJECTS due to missing distinct constructor
     GeneratorObjectPrototype* m_generator_object_prototype { nullptr };
 
+    GlobalEnvironmentRecord* m_environment_record { nullptr };
+
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     ConstructorName* m_##snake_name##_constructor { nullptr };                           \
     Object* m_##snake_name##_prototype { nullptr };
@@ -97,6 +97,8 @@ private:
     Object* m_##snake_name##_prototype { nullptr };
     JS_ENUMERATE_ITERATOR_PROTOTYPES
 #undef __JS_ENUMERATE
+
+    Function* m_eval_function;
 };
 
 template<typename ConstructorType>

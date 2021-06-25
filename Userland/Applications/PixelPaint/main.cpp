@@ -68,7 +68,7 @@ int main(int argc, char** argv)
     auto current_image_editor = [&]() -> PixelPaint::ImageEditor* {
         if (!tab_widget.active_widget())
             return nullptr;
-        return downcast<PixelPaint::ImageEditor>(tab_widget.active_widget());
+        return verify_cast<PixelPaint::ImageEditor>(tab_widget.active_widget());
     };
 
     Function<PixelPaint::ImageEditor&(NonnullRefPtr<PixelPaint::Image>)> create_new_editor;
@@ -237,7 +237,7 @@ int main(int argc, char** argv)
         auto* editor = current_image_editor();
         if (!editor->active_layer())
             return;
-        editor->selection().set(editor->active_layer()->relative_rect());
+        editor->selection().merge(editor->active_layer()->relative_rect(), PixelPaint::Selection::MergeMode::Set);
     }));
     edit_menu.add_action(GUI::Action::create(
         "Clear &Selection", { Mod_Ctrl | Mod_Shift, Key_A }, [&](auto&) {
@@ -263,6 +263,32 @@ int main(int argc, char** argv)
                 editor->set_primary_color(Color::Black);
                 editor->set_secondary_color(Color::White);
             }
+        },
+        window));
+    edit_menu.add_action(GUI::Action::create(
+        "&Load Color Palette", [&](auto&) {
+            auto open_path = GUI::FilePicker::get_open_filepath(window, "Load Color Palette");
+            if (!open_path.has_value())
+                return;
+
+            auto result = PixelPaint::PaletteWidget::load_palette_file(open_path.value());
+            if (result.is_error()) {
+                GUI::MessageBox::show_error(window, String::formatted("Loading color palette failed: {}", result.error()));
+                return;
+            }
+
+            palette_widget.display_color_list(result.value());
+        },
+        window));
+    edit_menu.add_action(GUI::Action::create(
+        "Sa&ve Color Palette", [&](auto&) {
+            auto save_path = GUI::FilePicker::get_save_filepath(window, "untitled", "palette");
+            if (!save_path.has_value())
+                return;
+
+            auto result = PixelPaint::PaletteWidget::save_palette_file(palette_widget.colors(), save_path.value());
+            if (result.is_error())
+                GUI::MessageBox::show_error(window, String::formatted("Writing color palette failed: {}", result.error()));
         },
         window));
 
@@ -526,14 +552,14 @@ int main(int argc, char** argv)
     };
 
     tab_widget.on_tab_close_click = [&](auto& widget) {
-        auto& image_editor = downcast<PixelPaint::ImageEditor>(widget);
+        auto& image_editor = verify_cast<PixelPaint::ImageEditor>(widget);
         tab_widget.deferred_invoke([&](auto&) {
             tab_widget.remove_tab(image_editor);
         });
     };
 
     tab_widget.on_change = [&](auto& widget) {
-        auto& image_editor = downcast<PixelPaint::ImageEditor>(widget);
+        auto& image_editor = verify_cast<PixelPaint::ImageEditor>(widget);
         palette_widget.set_image_editor(image_editor);
         layer_list_widget.set_image(&image_editor.image());
         layer_properties_widget.set_layer(nullptr);

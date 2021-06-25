@@ -10,20 +10,22 @@
 #include <AK/Random.h>
 #include <AK/Vector.h>
 #include <LibGUI/Application.h>
+#include <LibGUI/Frame.h>
 #include <LibGUI/Painter.h>
-#include <LibGUI/Widget.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Font.h>
 #include <LibGfx/StandardCursor.h>
 
 namespace FlappyBug {
 
-class Game final : public GUI::Widget {
+class Game final : public GUI::Frame {
     C_OBJECT(Game);
 
 public:
     static const int game_width = 560;
     static const int game_height = 480;
+
+    Function<u32(u32)> on_game_end;
 
 private:
     Game();
@@ -141,7 +143,7 @@ private:
     Obstacle m_obstacle;
     Cloud m_cloud;
     bool m_active;
-    Optional<float> m_highscore {};
+    Optional<float> m_high_score {};
     float m_last_score {};
     float m_difficulty {};
     float m_restart_cooldown {};

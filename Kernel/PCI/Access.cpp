@@ -8,6 +8,7 @@
 #include <Kernel/IO.h>
 #include <Kernel/PCI/Access.h>
 #include <Kernel/PCI/IOAccess.h>
+#include <Kernel/Sections.h>
 
 namespace Kernel {
 namespace PCI {

@@ -22,7 +22,7 @@ public:
     virtual Value call() override;
     virtual Value construct(Function& new_target) override;
     virtual const FlyString& name() const override;
-    virtual LexicalEnvironment* create_environment() override;
+    virtual FunctionEnvironmentRecord* create_environment_record() override;
 
     const Object& target() const { return m_target; }
     const Object& handler() const { return m_handler; }
@@ -37,7 +37,7 @@ public:
     virtual bool has_property(const PropertyName& name) const override;
     virtual Value get(const PropertyName& name, Value receiver, AllowSideEffects = AllowSideEffects::Yes) const override;
     virtual bool put(const PropertyName& name, Value value, Value receiver) override;
-    virtual bool delete_property(const PropertyName& name) override;
+    virtual bool delete_property(PropertyName const& name, bool force_throw_exception = false) override;
 
     bool is_revoked() const { return m_is_revoked; }
     void revoke() { m_is_revoked = true; }

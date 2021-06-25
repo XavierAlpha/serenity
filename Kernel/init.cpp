@@ -8,7 +8,7 @@
 #include <Kernel/ACPI/DynamicParser.h>
 #include <Kernel/ACPI/Initialize.h>
 #include <Kernel/ACPI/MultiProcessorParser.h>
-#include <Kernel/Arch/x86/CPU.h>
+#include <Kernel/Arch/x86/Processor.h>
 #include <Kernel/CMOS.h>
 #include <Kernel/CommandLine.h>
 #include <Kernel/DMI.h>
@@ -42,6 +42,7 @@
 #include <Kernel/RTC.h>
 #include <Kernel/Random.h>
 #include <Kernel/Scheduler.h>
+#include <Kernel/Sections.h>
 #include <Kernel/Storage/StorageManagement.h>
 #include <Kernel/TTY/ConsoleManagement.h>
 #include <Kernel/TTY/PTYMultiplexer.h>
@@ -102,7 +103,7 @@ static Processor s_bsp_processor; // global but let's keep it "private"
 // Once multi-tasking is ready, we spawn a new thread that starts in the
 // init_stage2() function. Initialization continues there.
 
-extern "C" UNMAP_AFTER_INIT [[noreturn]] void init()
+extern "C" [[noreturn]] UNMAP_AFTER_INIT void init()
 {
     if ((FlatPtr)&end_of_kernel_image >= 0xc2000000u) {
         // The kernel has grown too large again!
@@ -192,7 +193,7 @@ extern "C" UNMAP_AFTER_INIT [[noreturn]] void init()
 //
 // The purpose of init_ap() is to initialize APs for multi-tasking.
 //
-extern "C" UNMAP_AFTER_INIT [[noreturn]] void init_ap(u32 cpu, Processor* processor_info)
+extern "C" [[noreturn]] UNMAP_AFTER_INIT void init_ap(u32 cpu, Processor* processor_info)
 {
     processor_info->early_initialize(cpu);
 

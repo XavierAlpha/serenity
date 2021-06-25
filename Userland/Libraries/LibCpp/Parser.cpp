@@ -961,6 +961,19 @@ void Parser::print_tokens() const
     }
 }
 
+Vector<Parser::TodoEntry> Parser::get_todo_entries() const
+{
+    Vector<TodoEntry> ret;
+    for (auto& token : m_tokens) {
+        if (token.type() == Token::Type::Comment) {
+            if (token.text().contains("TODO")) {
+                ret.append({ token.text(), m_filename, token.start().line, token.start().column });
+            }
+        }
+    }
+    return ret;
+}
+
 NonnullRefPtr<StringLiteral> Parser::parse_string_literal(ASTNode& parent)
 {
     ScopeLogger<CPP_DEBUG> logger;

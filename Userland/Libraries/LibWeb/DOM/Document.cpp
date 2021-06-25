@@ -188,7 +188,7 @@ HTML::HTMLHtmlElement* Document::html_element()
 {
     auto* html = document_element();
     if (is<HTML::HTMLHtmlElement>(html))
-        return downcast<HTML::HTMLHtmlElement>(html);
+        return verify_cast<HTML::HTMLHtmlElement>(html);
     return nullptr;
 }
 
@@ -423,7 +423,7 @@ static void update_style_recursively(DOM::Node& node)
     node.for_each_child([&](auto& child) {
         if (child.needs_style_update()) {
             if (is<Element>(child))
-                downcast<Element>(child).recompute_style();
+                verify_cast<Element>(child).recompute_style();
             child.set_needs_style_update(false);
         }
         if (child.child_needs_style_update()) {
@@ -836,7 +836,7 @@ ExceptionOr<NonnullRefPtr<Node>> Document::adopt_node_binding(NonnullRefPtr<Node
     if (is<ShadowRoot>(*node))
         return DOM::HierarchyRequestError::create("Cannot adopt a shadow root into a document");
 
-    if (is<DocumentFragment>(*node) && downcast<DocumentFragment>(*node).host())
+    if (is<DocumentFragment>(*node) && verify_cast<DocumentFragment>(*node).host())
         return node;
 
     adopt_node(*node);
@@ -871,6 +871,17 @@ void Document::set_focused_element(Element* element)
         return;
 
     m_focused_element = element;
+
+    if (m_layout_root)
+        m_layout_root->set_needs_display();
+}
+
+void Document::set_active_element(Element* element)
+{
+    if (m_active_element == element)
+        return;
+
+    m_active_element = element;
 
     if (m_layout_root)
         m_layout_root->set_needs_display();

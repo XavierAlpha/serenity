@@ -127,7 +127,7 @@ void insert_into_and_scan_btree(int num_keys);
 NonnullRefPtr<SQL::BTree> setup_btree(SQL::Heap& heap)
 {
     SQL::TupleDescriptor tuple_descriptor;
-    tuple_descriptor.append({ "key_value", SQL::SQLType::Integer, SQL::Order::Ascending });
+    tuple_descriptor.append({ "key_value", SQL::SQLType::Integer, SQL::AST::Order::Ascending });
 
     auto root_pointer = heap.user_value(0);
     if (!root_pointer) {
@@ -143,9 +143,9 @@ NonnullRefPtr<SQL::BTree> setup_btree(SQL::Heap& heap)
 
 void insert_and_get_to_and_from_btree(int num_keys)
 {
-    ScopeGuard guard([]() { unlink("test.db"); });
+    ScopeGuard guard([]() { unlink("/tmp/test.db"); });
     {
-        auto heap = SQL::Heap::construct("test.db");
+        auto heap = SQL::Heap::construct("/tmp/test.db");
         auto btree = setup_btree(heap);
 
         for (auto ix = 0; ix < num_keys; ix++) {
@@ -160,7 +160,7 @@ void insert_and_get_to_and_from_btree(int num_keys)
     }
 
     {
-        auto heap = SQL::Heap::construct("test.db");
+        auto heap = SQL::Heap::construct("/tmp/test.db");
         auto btree = setup_btree(heap);
 
         for (auto ix = 0; ix < num_keys; ix++) {
@@ -175,9 +175,9 @@ void insert_and_get_to_and_from_btree(int num_keys)
 
 void insert_into_and_scan_btree(int num_keys)
 {
-    ScopeGuard guard([]() { unlink("test.db"); });
+    ScopeGuard guard([]() { unlink("/tmp/test.db"); });
     {
-        auto heap = SQL::Heap::construct("test.db");
+        auto heap = SQL::Heap::construct("/tmp/test.db");
         auto btree = setup_btree(heap);
 
         for (auto ix = 0; ix < num_keys; ix++) {
@@ -192,7 +192,7 @@ void insert_into_and_scan_btree(int num_keys)
     }
 
     {
-        auto heap = SQL::Heap::construct("test.db");
+        auto heap = SQL::Heap::construct("/tmp/test.db");
         auto btree = setup_btree(heap);
 
         int count = 0;

@@ -14,7 +14,7 @@
 #include <LibJS/Bytecode/Register.h>
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Heap/Cell.h>
-#include <LibJS/Runtime/ScopeObject.h>
+#include <LibJS/Runtime/EnvironmentRecord.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS::Bytecode::Op {
@@ -635,10 +635,10 @@ private:
     Optional<Label> m_continuation_label;
 };
 
-class PushLexicalEnvironment final : public Instruction {
+class PushDeclarativeEnvironmentRecord final : public Instruction {
 public:
-    explicit PushLexicalEnvironment(HashMap<u32, Variable> variables)
-        : Instruction(Type::PushLexicalEnvironment)
+    explicit PushDeclarativeEnvironmentRecord(HashMap<u32, Variable> variables)
+        : Instruction(Type::PushDeclarativeEnvironmentRecord)
         , m_variables(move(variables))
     {
     }
@@ -649,22 +649,6 @@ public:
 
 private:
     HashMap<u32, Variable> m_variables;
-};
-
-class LoadArgument final : public Instruction {
-public:
-    explicit LoadArgument(size_t index)
-        : Instruction(Type::LoadArgument)
-        , m_index(index)
-    {
-    }
-
-    void execute_impl(Bytecode::Interpreter&) const;
-    String to_string_impl(Bytecode::Executable const&) const;
-    void replace_references_impl(BasicBlock const&, BasicBlock const&) { }
-
-private:
-    size_t m_index { 0 };
 };
 
 class GetIterator final : public Instruction {

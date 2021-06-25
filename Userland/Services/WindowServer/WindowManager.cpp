@@ -950,20 +950,11 @@ bool WindowManager::process_mouse_event_for_titlebar_buttons(MouseEvent const& e
 void WindowManager::process_mouse_event_for_window(HitTestResult& result, MouseEvent const& event)
 {
     auto& window = *result.window;
-
-    if (auto* blocking_modal_window = window.blocking_modal_window()) {
-        if (event.type() == Event::Type::MouseDown) {
-            // We're clicking on something that's blocked by a modal window.
-            // Flash the modal window to let the user know about it.
-            blocking_modal_window->frame().start_flash_animation();
-        }
-        // Don't send mouse events to windows blocked by a modal child.
-        return;
-    }
+    auto* blocking_modal_window = window.blocking_modal_window();
 
     // First check if we should initiate a move or resize (Super+LMB or Super+RMB).
     // In those cases, the event is swallowed by the window manager.
-    if (window.is_movable()) {
+    if (!blocking_modal_window && window.is_movable()) {
         if (!window.is_fullscreen() && m_keyboard_modifiers == Mod_Super && event.type() == Event::MouseDown && event.button() == MouseButton::Left) {
             start_window_move(window, event);
             return;
@@ -979,6 +970,16 @@ void WindowManager::process_mouse_event_for_window(HitTestResult& result, MouseE
             move_to_front_and_make_active(window);
         else if (window.type() == WindowType::Desktop)
             set_active_window(&window);
+    }
+
+    if (blocking_modal_window) {
+        if (event.type() == Event::Type::MouseDown) {
+            // We're clicking on something that's blocked by a modal window.
+            // Flash the modal window to let the user know about it.
+            blocking_modal_window->frame().start_flash_animation();
+        }
+        // Don't send mouse events to windows blocked by a modal child.
+        return;
     }
 
     if (result.is_frame_hit) {
@@ -1006,8 +1007,10 @@ void WindowManager::process_mouse_event(MouseEvent& event)
         return;
 
     // 2. Send the mouse event to all windows with global cursor tracking enabled.
+    // The active input tracking window is excluded here because we're sending the event to it
+    // in the next step.
     m_window_stack.for_each_visible_window_from_front_to_back([&](Window& window) {
-        if (window.global_cursor_tracking())
+        if (window.global_cursor_tracking() && &window != m_active_input_tracking_window)
             deliver_mouse_event(window, event, false);
         return IterationDecision::Continue;
     });

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <Kernel/Arch/x86/CPU.h>
 #include <Kernel/Assertions.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Interrupts/IRQHandler.h>
 #include <Kernel/Interrupts/InterruptManagement.h>
 #include <Kernel/Interrupts/PIC.h>
 #include <Kernel/Interrupts/SharedIRQHandler.h>
+#include <Kernel/Sections.h>
 
 namespace Kernel {
 

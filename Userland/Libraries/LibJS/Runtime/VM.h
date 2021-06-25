@@ -42,14 +42,15 @@ struct ScopeFrame {
     bool pushed_environment { false };
 };
 
-struct CallFrame {
+struct ExecutionContext {
     const ASTNode* current_node { nullptr };
     FlyString function_name;
-    Value callee;
+    Function* function { nullptr };
     Value this_value;
     Vector<Value> arguments;
     Array* arguments_object { nullptr };
-    ScopeObject* scope { nullptr };
+    EnvironmentRecord* lexical_environment { nullptr };
+    EnvironmentRecord* variable_environment { nullptr };
     bool is_strict_mode { false };
 };
 
@@ -72,6 +73,7 @@ public:
     void clear_exception() { m_exception = nullptr; }
 
     void dump_backtrace() const;
+    void dump_environment_record_chain() const;
 
     class InterpreterExecutionScope {
     public:
@@ -98,7 +100,7 @@ public:
         return *m_single_ascii_character_strings[character];
     }
 
-    void push_call_frame(CallFrame& call_frame, GlobalObject& global_object)
+    void push_execution_context(ExecutionContext& context, GlobalObject& global_object)
     {
         VERIFY(!exception());
         // Ensure we got some stack space left, so the next function call doesn't kill us.
@@ -106,55 +108,58 @@ public:
         if (m_stack_info.size_free() < 32 * KiB)
             throw_exception<Error>(global_object, "Call stack size limit exceeded");
         else
-            m_call_stack.append(&call_frame);
+            m_execution_context_stack.append(&context);
     }
 
-    void pop_call_frame()
+    void pop_execution_context()
     {
-        m_call_stack.take_last();
-        if (m_call_stack.is_empty() && on_call_stack_emptied)
+        m_execution_context_stack.take_last();
+        if (m_execution_context_stack.is_empty() && on_call_stack_emptied)
             on_call_stack_emptied();
     }
 
-    CallFrame& call_frame() { return *m_call_stack.last(); }
-    const CallFrame& call_frame() const { return *m_call_stack.last(); }
-    const Vector<CallFrame*>& call_stack() const { return m_call_stack; }
-    Vector<CallFrame*>& call_stack() { return m_call_stack; }
+    ExecutionContext& running_execution_context() { return *m_execution_context_stack.last(); }
+    ExecutionContext const& running_execution_context() const { return *m_execution_context_stack.last(); }
+    Vector<ExecutionContext*> const& execution_context_stack() const { return m_execution_context_stack; }
+    Vector<ExecutionContext*>& execution_context_stack() { return m_execution_context_stack; }
 
-    const ScopeObject* current_scope() const { return call_frame().scope; }
-    ScopeObject* current_scope() { return call_frame().scope; }
+    EnvironmentRecord const* lexical_environment() const { return running_execution_context().lexical_environment; }
+    EnvironmentRecord* lexical_environment() { return running_execution_context().lexical_environment; }
+
+    EnvironmentRecord const* variable_environment() const { return running_execution_context().variable_environment; }
+    EnvironmentRecord* variable_environment() { return running_execution_context().variable_environment; }
 
     bool in_strict_mode() const;
 
     template<typename Callback>
     void for_each_argument(Callback callback)
     {
-        if (m_call_stack.is_empty())
+        if (m_execution_context_stack.is_empty())
             return;
-        for (auto& value : call_frame().arguments)
+        for (auto& value : running_execution_context().arguments)
             callback(value);
     }
 
     size_t argument_count() const
     {
-        if (m_call_stack.is_empty())
+        if (m_execution_context_stack.is_empty())
             return 0;
-        return call_frame().arguments.size();
+        return running_execution_context().arguments.size();
     }
 
     Value argument(size_t index) const
     {
-        if (m_call_stack.is_empty())
+        if (m_execution_context_stack.is_empty())
             return {};
-        auto& arguments = call_frame().arguments;
+        auto& arguments = running_execution_context().arguments;
         return index < arguments.size() ? arguments[index] : js_undefined();
     }
 
     Value this_value(Object& global_object) const
     {
-        if (m_call_stack.is_empty())
+        if (m_execution_context_stack.is_empty())
             return &global_object;
-        return call_frame().this_value;
+        return running_execution_context().this_value;
     }
 
     Value last_value() const { return m_last_value; }
@@ -191,11 +196,11 @@ public:
     FlyString unwind_until_label() const { return m_unwind_until_label; }
 
     Value get_variable(const FlyString& name, GlobalObject&);
-    void set_variable(const FlyString& name, Value, GlobalObject&, bool first_assignment = false, ScopeObject* specific_scope = nullptr);
+    void set_variable(const FlyString& name, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
     bool delete_variable(FlyString const& name);
-    void assign(const Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>>& target, Value, GlobalObject&, bool first_assignment = false, ScopeObject* specific_scope = nullptr);
-    void assign(const FlyString& target, Value, GlobalObject&, bool first_assignment = false, ScopeObject* specific_scope = nullptr);
-    void assign(const NonnullRefPtr<BindingPattern>& target, Value, GlobalObject&, bool first_assignment = false, ScopeObject* specific_scope = nullptr);
+    void assign(const Variant<NonnullRefPtr<Identifier>, NonnullRefPtr<BindingPattern>>& target, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
+    void assign(const FlyString& target, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
+    void assign(const NonnullRefPtr<BindingPattern>& target, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
 
     Reference get_reference(const FlyString& name);
 
@@ -221,9 +226,7 @@ public:
 
     String join_arguments(size_t start_index = 0) const;
 
-    Value resolve_this_binding(GlobalObject&) const;
-    const ScopeObject* find_this_scope() const;
-    Value get_new_target() const;
+    Value get_new_target();
 
     template<typename... Args>
     [[nodiscard]] ALWAYS_INLINE Value call(Function& function, Value this_value, Args... args)
@@ -238,8 +241,6 @@ public:
     }
 
     CommonPropertyNames names;
-
-    Shape& scope_object_shape() { return *m_scope_object_shape; }
 
     void run_queued_promise_jobs();
     void enqueue_promise_job(NativeFunction&);
@@ -263,7 +264,7 @@ private:
     Heap m_heap;
     Vector<Interpreter*> m_interpreters;
 
-    Vector<CallFrame*> m_call_stack;
+    Vector<ExecutionContext*> m_execution_context_stack;
 
     Value m_last_value;
     ScopeType m_unwind_until { ScopeType::None };
@@ -284,8 +285,6 @@ private:
     Symbol* m_well_known_symbol_##snake_name { nullptr };
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS
 #undef __JS_ENUMERATE
-
-    Shape* m_scope_object_shape { nullptr };
 
     bool m_underscore_is_last_value { false };
 

@@ -9,13 +9,14 @@
 #include <AK/Singleton.h>
 #include <AK/Types.h>
 #include <Kernel/ACPI/Parser.h>
-#include <Kernel/Arch/x86/CPU.h>
+#include <Kernel/Arch/x86/MSR.h>
 #include <Kernel/Arch/x86/ProcessorInfo.h>
 #include <Kernel/Debug.h>
 #include <Kernel/IO.h>
 #include <Kernel/Interrupts/APIC.h>
 #include <Kernel/Interrupts/SpuriousInterruptHandler.h>
 #include <Kernel/Panic.h>
+#include <Kernel/Sections.h>
 #include <Kernel/Thread.h>
 #include <Kernel/Time/APICTimer.h>
 #include <Kernel/VM/MemoryManager.h>

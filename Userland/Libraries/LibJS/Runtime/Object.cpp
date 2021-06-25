@@ -57,11 +57,17 @@ PropertyDescriptor PropertyDescriptor::from_dictionary(VM& vm, const Object& obj
         return {};
     if (getter.is_function())
         descriptor.getter = &getter.as_function();
+    if (!getter.is_empty())
+        descriptor.attributes.set_has_getter();
+
     auto setter = object.get(vm.names.set);
     if (vm.exception())
         return {};
     if (setter.is_function())
         descriptor.setter = &setter.as_function();
+    if (!setter.is_empty())
+        descriptor.attributes.set_has_setter();
+
     return descriptor;
 }
 
@@ -251,7 +257,6 @@ bool Object::test_integrity_level(IntegrityLevel level)
 Value Object::get_own_property(const PropertyName& property_name, Value receiver, AllowSideEffects allow_side_effects) const
 {
     VERIFY(property_name.is_valid());
-    VERIFY(!receiver.is_empty());
 
     Value value_here;
 
@@ -269,10 +274,11 @@ Value Object::get_own_property(const PropertyName& property_name, Value receiver
 
     VERIFY(!value_here.is_empty());
     if (allow_side_effects == AllowSideEffects::Yes) {
+        VERIFY(!receiver.is_empty());
         if (value_here.is_accessor())
             return value_here.as_accessor().call_getter(receiver);
         if (value_here.is_native_property())
-            return call_native_property_getter(value_here.as_native_property(), receiver);
+            return call_native_property_getter(value_here.as_native_property(), this);
     }
     return value_here;
 }
@@ -326,11 +332,18 @@ MarkedValueList Object::get_own_properties(PropertyKind kind, bool only_enumerab
         if (kind == PropertyKind::Key) {
             properties.append(property.key.to_value(vm()));
         } else if (kind == PropertyKind::Value) {
-            properties.append(get(property.key));
+            Value v = get(property.key);
+            // Value may just have been deleted
+            if (!v.is_empty())
+                properties.append(v);
         } else {
+            Value val = get(property.key);
+            if (val.is_empty())
+                return;
+
             auto* entry_array = Array::create(global_object());
             entry_array->define_property(0, property.key.to_value(vm()));
-            entry_array->define_property(1, get(property.key));
+            entry_array->define_property(1, val);
             properties.append(entry_array);
         }
     };
@@ -621,7 +634,7 @@ bool Object::put_own_property(const StringOrSymbol& property_name, Value value, 
 
     if (!is_extensible() && new_property) {
         dbgln_if(OBJECT_DEBUG, "Disallow define_property of non-extensible object");
-        if (throw_exceptions && vm().in_strict_mode())
+        if (throw_exceptions)
             vm().throw_exception<TypeError>(global_object(), ErrorType::NonExtensibleDefine, property_name.to_display_string());
         return false;
     }
@@ -729,7 +742,7 @@ bool Object::put_own_property_by_index(u32 property_index, Value value, Property
 
     if (!is_extensible() && new_property) {
         dbgln_if(OBJECT_DEBUG, "Disallow define_property of non-extensible object");
-        if (throw_exceptions && vm().in_strict_mode())
+        if (throw_exceptions)
             vm().throw_exception<TypeError>(global_object(), ErrorType::NonExtensibleDefine, property_index);
         return false;
     }
@@ -742,23 +755,72 @@ bool Object::put_own_property_by_index(u32 property_index, Value value, Property
             attributes.set_has_setter();
     }
 
-    PropertyAttributes existing_attributes = new_property ? 0 : existing_property.value().attributes;
+    if (new_property) {
+        if (!is_extensible()) {
+            dbgln_if(OBJECT_DEBUG, "Disallow define_property of non-extensible object");
+            if (throw_exceptions)
+                vm().throw_exception<TypeError>(global_object(), ErrorType::NonExtensibleDefine, property_index);
+            return false;
+        }
 
-    if (!new_property && mode == PutOwnPropertyMode::DefineProperty && !existing_attributes.is_configurable() && attributes != existing_attributes) {
-        dbgln_if(OBJECT_DEBUG, "Disallow reconfig of non-configurable property");
-        if (throw_exceptions)
-            vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_index);
-        return false;
-    }
+        m_indexed_properties.put(this, property_index, value, attributes, mode == PutOwnPropertyMode::Put ? AllowSideEffects::Yes : AllowSideEffects::No);
 
-    auto value_here = new_property ? Value() : existing_property.value().value;
-    if (!new_property && mode == PutOwnPropertyMode::Put && !value_here.is_accessor() && !existing_attributes.is_writable()) {
-        dbgln_if(OBJECT_DEBUG, "Disallow write to non-writable property");
-        return false;
-    }
-
-    if (value.is_empty())
         return true;
+    }
+
+    if (attributes == 0 && value.is_empty())
+        return true;
+
+    PropertyAttributes existing_attributes = existing_property.value().attributes;
+    auto value_here = existing_property.value().value;
+
+    if (mode == PutOwnPropertyMode::DefineProperty && !existing_attributes.is_configurable()) {
+        if ((attributes.has_configurable() && attributes.is_configurable()) || (attributes.has_enumerable() && attributes.is_enumerable() != existing_attributes.is_enumerable())) {
+            dbgln_if(OBJECT_DEBUG, "Disallow reconfig of non-configurable property");
+            if (throw_exceptions)
+                vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_index);
+            return false;
+        }
+
+        if (value_here.is_accessor() != value.is_accessor()) {
+            dbgln_if(OBJECT_DEBUG, "Disallow reconfig of non-configurable property");
+            if (throw_exceptions)
+                vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_index);
+            return false;
+        }
+
+        if (!value_here.is_accessor() && !existing_attributes.is_writable() && ((attributes.has_writable() && attributes.is_writable()) || (!value.is_empty() && !same_value(value, value_here)))) {
+            dbgln_if(OBJECT_DEBUG, "Disallow reconfig of non-configurable property");
+            if (throw_exceptions)
+                vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_index);
+            return false;
+        }
+
+        if (value_here.is_accessor() && ((attributes.has_setter() && value.as_accessor().setter() != value_here.as_accessor().setter()) || (attributes.has_getter() && value.as_accessor().getter() != value_here.as_accessor().getter()))) {
+            dbgln_if(OBJECT_DEBUG, "Disallow reconfig of non-configurable property");
+            if (throw_exceptions)
+                vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_index);
+            return false;
+        }
+    }
+
+    if (mode == PutOwnPropertyMode::Put && !value_here.is_accessor() && !existing_attributes.is_writable()) {
+        dbgln_if(OBJECT_DEBUG, "Disallow write to non-writable property");
+        if (throw_exceptions)
+            vm().throw_exception<TypeError>(global_object(), ErrorType::DescWriteNonWritable, property_index);
+        return false;
+    }
+
+    PropertyAttributes combined_attributes = existing_attributes.overwrite(attributes);
+
+    if (value.is_empty()) {
+        if (combined_attributes == existing_attributes) {
+            return true;
+        }
+        value = value_here.value_or(js_undefined());
+    }
+
+    attributes = combined_attributes;
 
     if (value_here.is_native_property()) {
         call_native_property_setter(value_here.as_native_property(), this, value);
@@ -768,18 +830,24 @@ bool Object::put_own_property_by_index(u32 property_index, Value value, Property
     return true;
 }
 
-bool Object::delete_property(const PropertyName& property_name)
+bool Object::delete_property(PropertyName const& property_name, bool force_throw_exception)
 {
     VERIFY(property_name.is_valid());
 
-    if (property_name.is_number())
-        return m_indexed_properties.remove(property_name.as_number());
+    if (property_name.is_number()) {
+        if (!m_indexed_properties.remove(property_name.as_number())) {
+            if (force_throw_exception || vm().in_strict_mode())
+                vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_name.as_number());
+            return false;
+        }
+        return true;
+    }
 
     auto metadata = shape().lookup(property_name.to_string_or_symbol());
     if (!metadata.has_value())
         return true;
     if (!metadata.value().attributes.is_configurable()) {
-        if (vm().in_strict_mode())
+        if (force_throw_exception || vm().in_strict_mode())
             vm().throw_exception<TypeError>(global_object(), ErrorType::DescChangeNonConfigurable, property_name.to_string_or_symbol().to_display_string());
         return false;
     }
@@ -869,9 +937,7 @@ bool Object::put_by_index(u32 property_index, Value value)
                 return true;
             }
             if (value_here.value.is_native_property()) {
-                // FIXME: Why doesn't put_by_index() receive the receiver value from put()?!
-                auto receiver = this;
-                call_native_property_setter(value_here.value.as_native_property(), receiver, value);
+                call_native_property_setter(value_here.value.as_native_property(), this, value);
                 return true;
             }
         }
@@ -879,7 +945,7 @@ bool Object::put_by_index(u32 property_index, Value value)
         if (vm().exception())
             return {};
     }
-    return put_own_property_by_index(property_index, value, default_attributes, PutOwnPropertyMode::Put);
+    return put_own_property_by_index(property_index, value, default_attributes, PutOwnPropertyMode::Put, vm().in_strict_mode());
 }
 
 bool Object::put(const PropertyName& property_name, Value value, Value receiver)
@@ -908,7 +974,7 @@ bool Object::put(const PropertyName& property_name, Value value, Value receiver)
                 return true;
             }
             if (value_here.is_native_property()) {
-                call_native_property_setter(value_here.as_native_property(), receiver, value);
+                call_native_property_setter(value_here.as_native_property(), this, value);
                 return true;
             }
         }
@@ -916,7 +982,7 @@ bool Object::put(const PropertyName& property_name, Value value, Value receiver)
         if (vm().exception())
             return false;
     }
-    return put_own_property(string_or_symbol, value, default_attributes, PutOwnPropertyMode::Put);
+    return put_own_property(string_or_symbol, value, default_attributes, PutOwnPropertyMode::Put, vm().in_strict_mode());
 }
 
 bool Object::define_native_function(PropertyName const& property_name, AK::Function<Value(VM&, GlobalObject&)> native_function, i32 length, PropertyAttributes attribute)
@@ -1085,32 +1151,32 @@ Value Object::invoke_internal(const StringOrSymbol& property_name, Optional<Mark
 Value Object::call_native_property_getter(NativeProperty& property, Value this_value) const
 {
     auto& vm = this->vm();
-    CallFrame call_frame;
+    ExecutionContext execution_context;
     if (auto* interpreter = vm.interpreter_if_exists())
-        call_frame.current_node = interpreter->current_node();
-    call_frame.is_strict_mode = vm.in_strict_mode();
-    call_frame.this_value = this_value;
-    vm.push_call_frame(call_frame, global_object());
+        execution_context.current_node = interpreter->current_node();
+    execution_context.is_strict_mode = vm.in_strict_mode();
+    execution_context.this_value = this_value;
+    vm.push_execution_context(execution_context, global_object());
     if (vm.exception())
         return {};
     auto result = property.get(vm, global_object());
-    vm.pop_call_frame();
+    vm.pop_execution_context();
     return result;
 }
 
 void Object::call_native_property_setter(NativeProperty& property, Value this_value, Value setter_value) const
 {
     auto& vm = this->vm();
-    CallFrame call_frame;
+    ExecutionContext execution_context;
     if (auto* interpreter = vm.interpreter_if_exists())
-        call_frame.current_node = interpreter->current_node();
-    call_frame.is_strict_mode = vm.in_strict_mode();
-    call_frame.this_value = this_value;
-    vm.push_call_frame(call_frame, global_object());
+        execution_context.current_node = interpreter->current_node();
+    execution_context.is_strict_mode = vm.in_strict_mode();
+    execution_context.this_value = this_value;
+    vm.push_execution_context(execution_context, global_object());
     if (vm.exception())
         return;
     property.set(vm, global_object(), setter_value);
-    vm.pop_call_frame();
+    vm.pop_execution_context();
 }
 
 }

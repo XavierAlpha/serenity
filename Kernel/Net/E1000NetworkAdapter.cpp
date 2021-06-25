@@ -8,6 +8,7 @@
 #include <Kernel/Debug.h>
 #include <Kernel/Net/E1000NetworkAdapter.h>
 #include <Kernel/PCI/IDs.h>
+#include <Kernel/Sections.h>
 
 namespace Kernel {
 
@@ -164,7 +165,7 @@ UNMAP_AFTER_INIT RefPtr<E1000NetworkAdapter> E1000NetworkAdapter::try_to_initial
     if (!is_valid_device_id(id.device_id))
         return {};
     u8 irq = PCI::get_interrupt_line(address);
-    auto adapter = adopt_ref_if_nonnull(new E1000NetworkAdapter(address, irq));
+    auto adapter = adopt_ref_if_nonnull(new (nothrow) E1000NetworkAdapter(address, irq));
     if (!adapter)
         return {};
     if (adapter->initialize())

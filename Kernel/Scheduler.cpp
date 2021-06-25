@@ -7,12 +7,15 @@
 #include <AK/ScopeGuard.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
+#include <Kernel/Arch/x86/InterruptDisabler.h>
+#include <Kernel/Arch/x86/TrapFrame.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Panic.h>
 #include <Kernel/PerformanceManager.h>
 #include <Kernel/Process.h>
 #include <Kernel/RTC.h>
 #include <Kernel/Scheduler.h>
+#include <Kernel/Sections.h>
 #include <Kernel/Time/TimeManagement.h>
 #include <Kernel/TimerQueue.h>
 
@@ -225,10 +228,14 @@ bool Scheduler::pick_next()
 
     auto& thread_to_schedule = pull_next_runnable_thread();
     if constexpr (SCHEDULER_DEBUG) {
+#if ARCH(I386)
         dbgln("Scheduler[{}]: Switch to {} @ {:04x}:{:08x}",
             Processor::id(),
             thread_to_schedule,
             thread_to_schedule.tss().cs, thread_to_schedule.tss().eip);
+#else
+        PANIC("Scheduler::pick_next() not implemented");
+#endif
     }
 
     // We need to leave our first critical section before switching context,
@@ -568,14 +575,22 @@ void dump_thread_list()
     dbgln("Scheduler thread list for processor {}:", Processor::id());
 
     auto get_cs = [](Thread& thread) -> u16 {
+#if ARCH(I386)
         if (!thread.current_trap())
             return thread.tss().cs;
+#else
+        PANIC("get_cs() not implemented");
+#endif
         return thread.get_register_dump_from_stack().cs;
     };
 
     auto get_eip = [](Thread& thread) -> u32 {
+#if ARCH(I386)
         if (!thread.current_trap())
             return thread.tss().eip;
+#else
+        PANIC("get_eip() not implemented");
+#endif
         return thread.get_register_dump_from_stack().eip;
     };
 
