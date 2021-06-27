@@ -1,32 +1,4 @@
 .code32
-.set MULTIBOOT_MAGIC,         0x1badb002
-.set MULTIBOOT_PAGE_ALIGN,    0x1
-.set MULTIBOOT_MEMORY_INFO,   0x2
-.set MULTIBOOT_VIDEO_MODE,    0x4
-.set multiboot_flags,         MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO | MULTIBOOT_VIDEO_MODE
-.set multiboot_checksum,      -(MULTIBOOT_MAGIC + multiboot_flags)
-
-.section .multiboot
-.align 4
-
-.long MULTIBOOT_MAGIC
-.long multiboot_flags
-.long multiboot_checksum
-
-
-/* for MULTIBOOT_MEMORY_INFO */
-.long 0x00000000    /* header_addr */
-.long 0x00000000    /* load_addr */
-.long 0x00000000    /* load_end_addr */
-.long 0x00000000    /* bss_end_addr */
-.long 0x00000000    /* entry_addr */
-
-/* for MULTIBOOT_VIDEO_MODE */
-.long 0x00000000    /* mode_type */
-.long 1280          /* width */
-.long 1024          /* height */
-.long 32            /* depth */
-
 .section .stack, "aw", @nobits
 stack_bottom:
 .skip 32768
@@ -38,6 +10,9 @@ kernel_cmdline:
 
 .section .page_tables, "aw", @nobits
 .align 4096
+.global boot_pml4t
+boot_pml4t:
+.skip 4096
 .global boot_pdpt
 boot_pdpt:
 .skip 4096
@@ -52,24 +27,28 @@ boot_pd0_pt0:
 .skip 4096 * 4
 .global boot_pd3_pts
 boot_pd3_pts:
-.skip 4096 * 8
+.skip 4096 * 16
 .global boot_pd3_pt1023
 boot_pd3_pt1023:
 .skip 4096
 
-.section .text
+.section .boot_text, "ax"
 
 .global start
 .type start, @function
 
-.extern init 
+.extern init
 .type init, @function
 
 .extern multiboot_info_ptr
 .type multiboot_info_ptr, @object
 
 /*
-    construct the following (32-bit PAE) page table layout:
+    construct the following (64-bit PML4T) page table layout:
+
+pml4t:
+
+    0: pdpt (0-512GB)
 
 pdpt
 
@@ -92,11 +71,31 @@ boot_pd3 : 512 pde's
     5: boot_pd3_pts[5] (3082-3084MB) (pseudo 512 4KB pages)
     6: boot_pd3_pts[6] (3084-3086MB) (pseudo 512 4KB pages)
     7: boot_pd3_pts[7] (3086-3088MB) (pseudo 512 4KB pages)
-    8: boot_pd3_pt1023 (4094-4096MB) (for page table mappings)
+    
+    8: boot_pd3_pts[8] (3088-3090MB) (pseudo 512 4KB pages)
+    9: boot_pd3_pts[9] (3090-3076MB) (pseudo 512 4KB pages)
+    10: boot_pd3_pts[10] (3092-3094MB) (pseudo 512 4KB pages)
+    11: boot_pd3_pts[11] (3094-3096MB) (pseudo 512 4KB pages)
+    12: boot_pd3_pts[12] (3096-3098MB) (pseudo 512 4KB pages)
+    13: boot_pd3_pts[13] (3098-3100MB) (pseudo 512 4KB pages)
+    14: boot_pd3_pts[14] (3100-3102MB) (pseudo 512 4KB pages)
+    15: boot_pd3_pts[15] (3102-3104MB) (pseudo 512 4KB pages)
+
+    16: boot_pd3_pt1023 (4094-4096MB) (for page table mappings)
 
 the 9 page tables each contain 512 pte's that map individual 4KB pages
 
 */
+
+gdt64:
+    .quad 0
+gdt64code:
+    .quad (1<<43) | (1<<44) | (1<<47) | (1<<53) /* executable, code segment, present, 64-bit */
+gdt64ptr:
+    .short . - gdt64 - 1
+    .quad gdt64
+
+.set code64_sel,  gdt64code - gdt64
 
 start:
     cli
@@ -115,6 +114,18 @@ start:
     movl $(kernel_cmdline - 0xc0000000), %edi
     rep movsl
 
+    /* clear pml4t */
+    movl $(boot_pml4t - 0xc0000000), %edi
+    movl $1024, %ecx
+    xorl %eax, %eax
+    rep stosl
+
+    /* set up pml4t[0] */
+    movl $(boot_pml4t - 0xc0000000), %edi
+    movl $(boot_pdpt - 0xc0000000), 0(%edi)
+    /* R/W + Present */
+    orl $0x3, 0(%edi)
+
     /* clear pdpt */
     movl $(boot_pdpt - 0xc0000000), %edi
     movl $1024, %ecx
@@ -123,8 +134,8 @@ start:
 
     /* set up pdpt[0] and pdpt[3] */
     movl $(boot_pdpt - 0xc0000000), %edi
-    movl $((boot_pd0 - 0xc0000000) + 1), 0(%edi)
-    movl $((boot_pd3 - 0xc0000000) + 1), 24(%edi)
+    movl $((boot_pd0 - 0xc0000000) + 3), 0(%edi)
+    movl $((boot_pd3 - 0xc0000000) + 3), 24(%edi)
 
     /* clear pd0 */
     movl $(boot_pd0 - 0xc0000000), %edi
@@ -146,7 +157,7 @@ start:
 
     /* clear pd3's pt's */
     movl $(boot_pd3_pts - 0xc0000000), %edi
-    movl $(1024 * 9), %ecx
+    movl $(1024 * 17), %ecx
     xorl %eax, %eax
     rep stosl
 
@@ -158,7 +169,7 @@ start:
     orl $0x3, 0(%edi)
 
     /* add boot_pd3_pts to boot_pd3 */
-    movl $8, %ecx
+    movl $16, %ecx
     movl $(boot_pd3 - 0xc0000000), %edi
     movl $(boot_pd3_pts - 0xc0000000), %eax
 
@@ -183,8 +194,8 @@ start:
     addl $4096, %eax
     loop 1b
 
-    /* pseudo identity map the 3072-3090MB range */
-    movl $(512 * 8), %ecx
+    /* pseudo identity map the 3072-3102MB range */
+    movl $(512 * 16), %ecx
     movl $(boot_pd3_pts - 0xc0000000), %edi
     xorl %eax, %eax
 
@@ -202,8 +213,8 @@ start:
     orl $0x3, 4088(%edi)
     movl $0, 4092(%edi)
 
-    /* point CR3 to PDPT */
-    movl $(boot_pdpt - 0xc0000000), %eax
+    /* point CR3 to PML4T */
+    movl $(boot_pml4t - 0xc0000000), %eax
     movl %eax, %cr3
 
     /* enable PAE + PSE */
@@ -239,6 +250,7 @@ start:
     movl $256, %ecx
     movl $(boot_pd0_pt0 - 0xc0000000), %edi
     xorl %eax, %eax
+
 1:
     movl %eax, 0(%edi)
     addl $8, %edi
@@ -248,8 +260,13 @@ start:
     addl $0xc0000000, %ebx
     movl %ebx, multiboot_info_ptr
 
+    lgdt gdt64ptr
+    ljmpl $code64_sel, $1f
+
+.code64
+1:
     call init
-    add $4, %esp
+    add $4, %rsp
 
     cli
 loop:
@@ -325,11 +342,11 @@ apic_ap_start32:
     orl $0x800, %eax
     wrmsr
 1:
-    
+
     /* load the bsp's cr3 value */
     movl (ap_cpu_init_cr3 - apic_ap_start)(%ebp), %eax
     movl %eax, %cr3
-    
+
     /* enable PAE + PSE */
     movl %cr4, %eax
     orl $0x60, %eax
@@ -349,9 +366,9 @@ apic_ap_start32_2:
     /* flush the TLB */
     movl %cr3, %eax
     movl %eax, %cr3
-    
+
     movl $0xc0008000, %ebp
-    
+
     /* now load the final gdt and idt from the identity mapped area */
     movl (ap_cpu_gdtr - apic_ap_start)(%ebp), %eax
     lgdt (%eax)
@@ -363,20 +380,20 @@ apic_ap_start32_2:
     movl %eax, %cr0
     movl (ap_cpu_init_cr4 - apic_ap_start)(%ebp), %eax
     movl %eax, %cr4
-    
+
     /* push the Processor pointer this CPU is going to use */
     movl (ap_cpu_init_processor_info_array - apic_ap_start)(%ebp), %eax
     addl $0xc0000000, %eax
     movl 0(%eax, %esi, 4), %eax
     push %eax
-    
+
     /* push the cpu id, 0 representing the bsp and call into c++ */
     incl %esi
     push %esi
-    
+
     xor %ebp, %ebp
     cld
-    
+
     /* We are in identity mapped P0x8000 and the BSP will unload this code
        once all APs are initialized, so call init_ap but return to our
        infinite loop */

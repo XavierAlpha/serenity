@@ -30,8 +30,8 @@ void RegExpPrototype::initialize(GlobalObject& global_object)
     define_native_function(vm.names.test, test, 1, attr);
     define_native_function(vm.names.exec, exec, 1, attr);
 
-    define_native_function(vm.well_known_symbol_match(), symbol_match, 1, attr);
-    define_native_function(vm.well_known_symbol_replace(), symbol_replace, 2, attr);
+    define_native_function(*vm.well_known_symbol_match(), symbol_match, 1, attr);
+    define_native_function(*vm.well_known_symbol_replace(), symbol_replace, 2, attr);
 
     define_native_accessor(vm.names.flags, flags, {}, Attribute::Configurable);
     define_native_accessor(vm.names.source, source, {}, Attribute::Configurable);
@@ -262,7 +262,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_match)
         return {};
     bool global = global_value.to_boolean();
     // FIXME: Implement and use RegExpExec, this does something different - https://tc39.es/ecma262/#sec-regexpexec
-    auto* exec = get_method(global_object, rx, vm.names.exec);
+    auto* exec = Value(rx).get_method(global_object, vm.names.exec);
     if (!exec)
         return js_undefined();
     // FIXME end
@@ -295,7 +295,7 @@ JS_DEFINE_NATIVE_FUNCTION(RegExpPrototype::symbol_replace)
         rx->regex().start_offset = 0;
 
     // FIXME: Implement and use RegExpExec - https://tc39.es/ecma262/#sec-regexpexec
-    auto* exec = get_method(global_object, rx, vm.names.exec);
+    auto* exec = Value(rx).get_method(global_object, vm.names.exec);
     if (!exec)
         return {};
 

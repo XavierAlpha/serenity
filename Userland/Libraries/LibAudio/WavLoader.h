@@ -39,7 +39,7 @@ public:
     virtual bool sniff() override { return valid; }
 
     virtual bool has_error() override { return !m_error_string.is_null(); }
-    virtual const char* error_string() override { return m_error_string.characters(); }
+    virtual const String& error_string() override { return m_error_string; }
 
     // The Buffer returned contains input data resampled at the
     // destination audio device sample rate.
@@ -71,7 +71,7 @@ private:
     //
     // It would avoid duplicate resampling code and would allow clients
     // to be agnostic of the destination audio device's sample rate.
-    OwnPtr<ResampleHelper> m_resampler;
+    OwnPtr<ResampleHelper<double>> m_resampler;
 
     u32 m_sample_rate { 0 };
     u16 m_num_channels { 0 };

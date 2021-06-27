@@ -35,13 +35,13 @@ public:
 
     auto& bytecode_executable() const { return m_bytecode_executable; }
 
-    virtual EnvironmentRecord* environment() override { return m_parent_scope; }
+    virtual EnvironmentRecord* environment() override { return m_environment; }
 
 protected:
     virtual bool is_strict_mode() const final { return m_is_strict; }
 
 private:
-    virtual FunctionEnvironmentRecord* create_environment_record() override;
+    virtual FunctionEnvironmentRecord* create_environment_record(Function&) override;
     virtual void visit_edges(Visitor&) override;
 
     Value execute_function_body();
@@ -53,7 +53,7 @@ private:
     NonnullRefPtr<Statement> m_body;
     const Vector<FunctionNode::Parameter> m_parameters;
     Optional<Bytecode::Executable> m_bytecode_executable;
-    EnvironmentRecord* m_parent_scope { nullptr };
+    EnvironmentRecord* m_environment { nullptr };
     i32 m_function_length { 0 };
     FunctionKind m_kind { FunctionKind::Regular };
     bool m_is_strict { false };

@@ -59,13 +59,18 @@ set(KERNEL_SOURCES
     Devices/HID/PS2KeyboardDevice.cpp
     Devices/HID/PS2MouseDevice.cpp
     Devices/HID/VMWareMouseDevice.cpp
-    Graphics/Console/FramebufferConsole.cpp
+    Graphics/Console/GenericFramebufferConsole.cpp
+    Graphics/Console/ContiguousFramebufferConsole.cpp
     Graphics/Console/TextModeConsole.cpp
     Graphics/Console/VGAConsole.cpp
     Graphics/BochsGraphicsAdapter.cpp
     Graphics/FramebufferDevice.cpp
     Graphics/GraphicsManagement.cpp
     Graphics/IntelNativeGraphicsAdapter.cpp
+    Graphics/VirtIOGPU/VirtIOFrameBufferDevice.cpp
+    Graphics/VirtIOGPU/VirtIOGPUConsole.cpp
+    Graphics/VirtIOGPU/VirtIOGPU.cpp
+    Graphics/VirtIOGPU/VirtIOGraphicsAdapter.cpp
     Graphics/VGACompatibleAdapter.cpp
     Storage/Partition/DiskPartition.cpp
     Storage/Partition/DiskPartitionMetadata.cpp
@@ -281,6 +286,7 @@ set(KERNEL_SOURCES
 set(KERNEL_SOURCES
     ${KERNEL_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/ASM_wrapper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Boot/multiboot.S
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/CPU.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Interrupts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Processor.cpp
@@ -342,7 +348,7 @@ set(SOURCES
 )
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option -Wvla -Wnull-dereference")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pie -fPIE -fno-rtti -ffreestanding -fbuiltin")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -ffreestanding -fbuiltin")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mno-80387 -mno-mmx -mno-sse -mno-sse2")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-asynchronous-unwind-tables")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-strong")
@@ -351,7 +357,9 @@ if (NOT ${CMAKE_HOST_SYSTEM_NAME} MATCHES SerenityOS)
 endif()
 
 if ("${SERENITY_ARCH}" STREQUAL "x86_64")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcmodel=large -mno-red-zone")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcmodel=large -fno-pic -mno-red-zone -z max-page-size=0x1000")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pie -fPIE")
 endif()
 
 # Kernel Undefined Behavior Sanitizer (KUBSAN)
@@ -386,22 +394,35 @@ else()
     link_directories(${TOOLCHAIN_ROOT}/Kernel/lib/gcc/${SERENITY_ARCH}-pc-serenity/${GCC_VERSION}/)
 endif()
 
-add_executable(Kernel ${SOURCES})
-add_dependencies(Kernel generate_EscapeSequenceStateMachine.h)
+if ("${SERENITY_ARCH}" STREQUAL "i686")
+    set(KERNEL_TARGET Kernel32)
+else()
+    set(KERNEL_TARGET Kernel64)
+endif()
 
-set_target_properties(Kernel PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/linker.ld)
+add_executable(${KERNEL_TARGET} ${SOURCES})
+add_dependencies(${KERNEL_TARGET} generate_EscapeSequenceStateMachine.h)
+
+set_target_properties(${KERNEL_TARGET} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/linker.ld)
 
 if (ENABLE_KERNEL_LTO)
     include(CheckIPOSupported)
     check_ipo_supported()
-    set_property(TARGET Kernel PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET ${KERNEL_TARGET} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
-target_link_libraries(Kernel kernel_heap gcc supc++)
-add_dependencies(Kernel kernel_heap)
-install(TARGETS Kernel RUNTIME DESTINATION boot)
+target_link_libraries(${KERNEL_TARGET} kernel_heap gcc supc++)
+add_dependencies(${KERNEL_TARGET} kernel_heap)
 
 add_custom_command(
-    TARGET Kernel
+    TARGET ${KERNEL_TARGET} POST_BUILD
+    COMMAND ${TOOLCHAIN_PREFIX}objcopy -O elf32-i386 ${CMAKE_CURRENT_BINARY_DIR}/${KERNEL_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/Kernel
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/Kernel
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Kernel" DESTINATION boot)
+
+add_custom_command(
+    TARGET ${KERNEL_TARGET} POST_BUILD
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/mkmap.sh
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kernel.map DESTINATION res)

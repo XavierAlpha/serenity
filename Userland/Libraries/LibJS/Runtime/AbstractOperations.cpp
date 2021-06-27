@@ -39,25 +39,6 @@ Value require_object_coercible(GlobalObject& global_object, Value value)
     return value;
 }
 
-// 7.3.10 GetMethod ( V, P ), https://tc39.es/ecma262/#sec-getmethod
-Function* get_method(GlobalObject& global_object, Value value, PropertyName const& property_name)
-{
-    auto& vm = global_object.vm();
-    auto* object = value.to_object(global_object);
-    if (vm.exception())
-        return nullptr;
-    auto property_value = object->get(property_name);
-    if (vm.exception())
-        return nullptr;
-    if (property_value.is_empty() || property_value.is_nullish())
-        return nullptr;
-    if (!property_value.is_function()) {
-        vm.throw_exception<TypeError>(global_object, ErrorType::NotAFunction, property_value.to_string_without_side_effects());
-        return nullptr;
-    }
-    return &property_value.as_function();
-}
-
 // 7.3.18 LengthOfArrayLike ( obj ), https://tc39.es/ecma262/#sec-lengthofarraylike
 size_t length_of_array_like(GlobalObject& global_object, Object const& object)
 {
@@ -112,7 +93,7 @@ Function* species_constructor(GlobalObject& global_object, Object const& object,
         vm.throw_exception<TypeError>(global_object, ErrorType::NotAConstructor, constructor.to_string_without_side_effects());
         return nullptr;
     }
-    auto species = constructor.as_object().get(vm.well_known_symbol_species()).value_or(js_undefined());
+    auto species = constructor.as_object().get(*vm.well_known_symbol_species()).value_or(js_undefined());
     if (species.is_nullish())
         return &default_constructor;
     if (species.is_constructor())
@@ -181,7 +162,6 @@ ObjectEnvironmentRecord* new_object_environment(Object& object, bool is_with_env
 // 9.4.3 GetThisEnvironment ( ), https://tc39.es/ecma262/#sec-getthisenvironment
 EnvironmentRecord& get_this_environment(VM& vm)
 {
-    // FIXME: Should be the *lexical* environment.
     for (auto* env = vm.lexical_environment(); env; env = env->outer_environment()) {
         if (env->has_this_binding())
             return *env;

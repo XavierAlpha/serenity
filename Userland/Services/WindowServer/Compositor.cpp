@@ -8,6 +8,7 @@
 #include "ClientConnection.h"
 #include "Event.h"
 #include "EventLoop.h"
+#include "MultiScaleBitmaps.h"
 #include "Screen.h"
 #include "Window.h"
 #include "WindowManager.h"
@@ -76,7 +77,7 @@ const Gfx::Bitmap& Compositor::front_bitmap_for_screenshot(Badge<ClientConnectio
     return *m_screen_data[screen.index()].m_front_bitmap;
 }
 
-void Compositor::ScreenData::init_bitmaps(Screen& screen)
+void Compositor::ScreenData::init_bitmaps(Compositor& compositor, Screen& screen)
 {
     auto size = screen.size();
 
@@ -97,13 +98,21 @@ void Compositor::ScreenData::init_bitmaps(Screen& screen)
 
     m_buffers_are_flipped = false;
     m_screen_can_set_buffer = screen.can_set_buffer();
+
+    // Recreate the screen-number overlay as the Screen instances may have changed, or get rid of it if we no longer need it
+    if (compositor.showing_screen_numbers()) {
+        m_screen_number_overlay = compositor.create_overlay<ScreenNumberOverlay>(screen);
+        m_screen_number_overlay->set_enabled(true);
+    } else {
+        m_screen_number_overlay = nullptr;
+    }
 }
 
 void Compositor::init_bitmaps()
 {
     m_screen_data.resize(Screen::count());
     Screen::for_each([&](auto& screen) {
-        m_screen_data[screen.index()].init_bitmaps(screen);
+        m_screen_data[screen.index()].init_bitmaps(*this, screen);
         return IterationDecision::Continue;
     });
 
@@ -143,28 +152,10 @@ void Compositor::compose()
         recompute_occlusions();
     }
 
+    // We should have recomputed occlusions if any overlay rects were changed
+    VERIFY(!m_overlay_rects_changed);
+
     auto dirty_screen_rects = move(m_dirty_screen_rects);
-    auto* dnd_client = wm.dnd_client();
-    if (!m_last_geometry_label_damage_rect.is_empty() || !m_last_dnd_rect.is_empty() || (m_invalidated_cursor && dnd_client)) {
-        Screen::for_each([&](auto& screen) {
-            if (!m_last_geometry_label_damage_rect.is_empty()) {
-                auto rect = m_last_geometry_label_damage_rect.intersected(screen.rect());
-                if (!rect.is_empty())
-                    dirty_screen_rects.add(rect);
-            }
-            if (!m_last_dnd_rect.is_empty()) {
-                auto rect = m_last_dnd_rect.intersected(screen.rect());
-                if (!rect.is_empty())
-                    dirty_screen_rects.add(rect);
-            }
-            if (m_invalidated_cursor && dnd_client) {
-                auto rect = wm.dnd_rect().intersected(screen.rect());
-                if (!rect.is_empty())
-                    dirty_screen_rects.add(rect);
-            }
-            return IterationDecision::Continue;
-        });
-    }
 
     // Mark window regions as dirty that need to be re-rendered
     wm.window_stack().for_each_visible_window_from_back_to_front([&](Window& window) {
@@ -517,6 +508,11 @@ void Compositor::compose()
             return is_overlapping;
         }());
 
+        if (!m_overlay_list.is_empty()) {
+            // Render everything to the temporary buffer before we copy it back
+            render_overlays();
+        }
+
         // Copy anything rendered to the temporary buffer to the back buffer
         Screen::for_each([&](auto& screen) {
             auto screen_rect = screen.rect();
@@ -525,67 +521,11 @@ void Compositor::compose()
                 screen_data.m_back_painter->blit(rect.location(), *screen_data.m_temp_bitmap, rect.translated(-screen_rect.location()));
             return IterationDecision::Continue;
         });
-
-        draw_geometry_label(cursor_screen);
     }
 
     m_invalidated_any = false;
     m_invalidated_window = false;
     m_invalidated_cursor = false;
-
-    if (wm.dnd_client()) {
-        auto dnd_rect = wm.dnd_rect();
-
-        Screen::for_each([&](auto& screen) {
-            auto screen_rect = screen.rect();
-            auto render_dnd_rect = screen_rect.intersected(dnd_rect);
-            if (render_dnd_rect.is_empty())
-                return IterationDecision::Continue;
-            auto& screen_data = m_screen_data[screen.index()];
-            auto& back_painter = *screen_data.m_back_painter;
-
-            // TODO: render once into a backing bitmap, then just blit...
-            auto render_dnd = [&]() {
-                back_painter.fill_rect(dnd_rect, wm.palette().selection().with_alpha(200));
-                back_painter.draw_rect(dnd_rect, wm.palette().selection());
-                if (!wm.dnd_text().is_empty()) {
-                    auto text_rect = dnd_rect;
-                    if (wm.dnd_bitmap())
-                        text_rect.translate_by(wm.dnd_bitmap()->width() + 8, 0);
-                    back_painter.draw_text(text_rect, wm.dnd_text(), Gfx::TextAlignment::CenterLeft, wm.palette().selection_text());
-                }
-                if (wm.dnd_bitmap()) {
-                    back_painter.blit(dnd_rect.top_left().translated(4, 4), *wm.dnd_bitmap(), wm.dnd_bitmap()->rect());
-                }
-            };
-
-            dirty_screen_rects.for_each_intersected(dnd_rect, [&](const Gfx::IntRect& render_rect) {
-                auto screen_render_rect = render_rect.intersected(screen_rect);
-                if (screen_render_rect.is_empty())
-                    return IterationDecision::Continue;
-                Gfx::PainterStateSaver saver(back_painter);
-                back_painter.add_clip_rect(screen_render_rect);
-                render_dnd();
-                return IterationDecision::Continue;
-            });
-            screen_data.m_flush_transparent_rects.for_each_intersected(dnd_rect, [&](const Gfx::IntRect& render_rect) {
-                auto screen_render_rect = render_rect.intersected(screen_rect);
-                if (screen_render_rect.is_empty())
-                    return IterationDecision::Continue;
-                Gfx::PainterStateSaver saver(back_painter);
-                back_painter.add_clip_rect(screen_render_rect);
-                render_dnd();
-                return IterationDecision::Continue;
-            });
-            m_last_dnd_rect = dnd_rect;
-            return IterationDecision::Continue;
-        });
-    } else {
-        if (!m_last_dnd_rect.is_empty()) {
-            invalidate_screen(m_last_dnd_rect);
-            m_last_dnd_rect = {};
-        }
-    }
 
     bool did_render_animation = false;
     Screen::for_each([&](auto& screen) {
@@ -597,7 +537,7 @@ void Compositor::compose()
     if (need_to_draw_cursor) {
         auto& screen_data = m_screen_data[cursor_screen.index()];
         screen_data.draw_cursor(cursor_screen, cursor_rect);
-        screen_data.m_flush_rects.add(cursor_rect);
+        screen_data.m_flush_rects.add(cursor_rect.intersected(cursor_screen.rect()));
         if (previous_cursor_screen && cursor_rect != previous_cursor_rect)
             m_screen_data[previous_cursor_screen->index()].m_flush_rects.add(previous_cursor_rect);
     }
@@ -623,10 +563,9 @@ void Compositor::flush(Screen& screen)
         screen_data.flip_buffers(screen);
 
     auto screen_rect = screen.rect();
-    auto do_flush = [&](const Gfx::IntRect& a_rect) {
-        auto rect = Gfx::IntRect::intersection(a_rect, screen_rect);
-        if (rect.is_empty())
-            return;
+    bool device_can_flush_buffers = screen.can_device_flush_buffers();
+    auto do_flush = [&](Gfx::IntRect rect) {
+        VERIFY(screen_rect.contains(rect));
         rect.translate_by(-screen_rect.location());
 
         // Almost everything in Compositor is in logical coordinates, with the painters having
@@ -662,6 +601,8 @@ void Compositor::flush(Screen& screen)
             from_ptr = (const Gfx::RGBA32*)((const u8*)from_ptr + pitch);
             to_ptr = (Gfx::RGBA32*)((u8*)to_ptr + pitch);
         }
+        if (device_can_flush_buffers)
+            screen.queue_flush_display_rect(rect);
     };
     for (auto& rect : screen_data.m_flush_rects.rects())
         do_flush(rect);
@@ -669,6 +610,8 @@ void Compositor::flush(Screen& screen)
         do_flush(rect);
     for (auto& rect : screen_data.m_flush_special_rects.rects())
         do_flush(rect);
+    if (device_can_flush_buffers)
+        screen.flush_display();
 }
 
 void Compositor::invalidate_screen()
@@ -797,7 +740,7 @@ bool Compositor::render_animation_frame(Screen& screen, Gfx::DisjointRectSet& fl
             dbgln_if(MINIMIZE_ANIMATION_DEBUG, "Minimize animation from {} to {} frame# {} {} on screen #{}", from_rect, to_rect, animation_index, rect, screen.index());
 
             painter.draw_rect(rect, Color::Transparent); // Color doesn't matter, we draw inverted
-            flush_rects.add(rect);
+            flush_rects.add(rect.intersected(screen.rect()));
             invalidate_screen(rect);
 
             did_render_any = true;
@@ -827,6 +770,7 @@ void Compositor::screen_resolution_changed()
 
     init_bitmaps();
     invalidate_occlusions();
+    overlay_rects_changed();
     compose();
 }
 
@@ -850,46 +794,6 @@ void Compositor::invalidate_cursor(bool compose_immediately)
         start_compose_async_timer();
 }
 
-void Compositor::draw_geometry_label(Screen& screen)
-{
-    auto& wm = WindowManager::the();
-    auto* window_being_moved_or_resized = wm.m_move_window ? wm.m_move_window.ptr() : (wm.m_resize_window ? wm.m_resize_window.ptr() : nullptr);
-    if (!window_being_moved_or_resized) {
-        m_last_geometry_label_damage_rect = {};
-        return;
-    }
-    auto geometry_string = window_being_moved_or_resized->rect().to_string();
-    if (!window_being_moved_or_resized->size_increment().is_null()) {
-        int width_steps = (window_being_moved_or_resized->width() - window_being_moved_or_resized->base_size().width()) / window_being_moved_or_resized->size_increment().width();
-        int height_steps = (window_being_moved_or_resized->height() - window_being_moved_or_resized->base_size().height()) / window_being_moved_or_resized->size_increment().height();
-        geometry_string = String::formatted("{} ({}x{})", geometry_string, width_steps, height_steps);
-    }
-
-    auto geometry_label_rect = Gfx::IntRect { 0, 0, wm.font().width(geometry_string) + 16, wm.font().glyph_height() + 10 };
-    geometry_label_rect.center_within(window_being_moved_or_resized->rect());
-    auto desktop_rect = wm.desktop_rect(screen);
-    if (geometry_label_rect.left() < desktop_rect.left())
-        geometry_label_rect.set_left(desktop_rect.left());
-    if (geometry_label_rect.top() < desktop_rect.top())
-        geometry_label_rect.set_top(desktop_rect.top());
-    if (geometry_label_rect.right() > desktop_rect.right())
-        geometry_label_rect.set_right_without_resize(desktop_rect.right());
-    if (geometry_label_rect.bottom() > desktop_rect.bottom())
-        geometry_label_rect.set_bottom_without_resize(desktop_rect.bottom());
-
-    auto& screen_data = m_screen_data[screen.index()];
-    auto& back_painter = *screen_data.m_back_painter;
-    auto geometry_label_damage_rect = geometry_label_rect.inflated(2, 2);
-    Gfx::PainterStateSaver saver(back_painter);
-    back_painter.add_clip_rect(geometry_label_damage_rect);
-
-    back_painter.fill_rect(geometry_label_rect.translated(1, 1), Color(Color::Black).with_alpha(80));
-    Gfx::StylePainter::paint_button(back_painter, geometry_label_rect.translated(-1, -1), wm.palette(), Gfx::ButtonStyle::Normal, false);
-    back_painter.draw_text(geometry_label_rect.translated(-1, -1), geometry_string, Gfx::TextAlignment::Center, wm.palette().window_text());
-
-    m_last_geometry_label_damage_rect = geometry_label_damage_rect;
-}
-
 void Compositor::change_cursor(const Cursor* cursor)
 {
     if (m_current_cursor == cursor)
@@ -911,6 +815,54 @@ void Compositor::change_cursor(const Cursor* cursor)
                 invalidate_cursor(true);
             });
     }
+}
+
+void Compositor::render_overlays()
+{
+    // NOTE: overlays should always be rendered to the temporary buffer!
+    for (auto& overlay : m_overlay_list) {
+        for (auto* screen : overlay.m_screens) {
+            auto& screen_data = m_screen_data[screen->index()];
+            auto& painter = screen_data.overlay_painter();
+            screen_data.for_each_intersected_flushing_rect(overlay.current_render_rect(), [&](auto& intersected_overlay_rect) {
+                Gfx::PainterStateSaver saver(painter);
+                painter.add_clip_rect(intersected_overlay_rect);
+                painter.translate(overlay.m_current_rect.location());
+                overlay.render(painter, *screen);
+                return IterationDecision::Continue;
+            });
+        }
+    }
+}
+
+void Compositor::add_overlay(Overlay& overlay)
+{
+    VERIFY(!overlay.m_list_node.is_in_list());
+    auto zorder = overlay.zorder();
+    bool did_insert = false;
+    for (auto& other_overlay : m_overlay_list) {
+        if (other_overlay.zorder() > zorder) {
+            m_overlay_list.insert_before(other_overlay, overlay);
+            did_insert = true;
+            break;
+        }
+    }
+    if (!did_insert)
+        m_overlay_list.append(overlay);
+
+    overlay.clear_invalidated();
+    overlay_rects_changed();
+    auto& rect = overlay.rect();
+    if (!rect.is_empty())
+        invalidate_screen(rect);
+}
+
+void Compositor::remove_overlay(Overlay& overlay)
+{
+    auto& current_render_rect = overlay.current_render_rect();
+    if (!current_render_rect.is_empty())
+        invalidate_screen(current_render_rect);
+    m_overlay_list.remove(overlay);
 }
 
 void Compositor::ScreenData::draw_cursor(Screen& screen, const Gfx::IntRect& cursor_rect)
@@ -943,6 +895,11 @@ bool Compositor::ScreenData::restore_cursor_back(Screen& screen, Gfx::IntRect& l
     return true;
 }
 
+void Compositor::update_fonts()
+{
+    ScreenNumberOverlay::pick_font();
+}
+
 void Compositor::notify_display_links()
 {
     ClientConnection::for_each_client([](auto& client) {
@@ -963,6 +920,35 @@ void Compositor::decrement_display_link_count(Badge<ClientConnection>)
     --m_display_link_count;
     if (!m_display_link_count)
         m_display_link_notify_timer->stop();
+}
+
+void Compositor::invalidate_current_screen_number_rects()
+{
+    for (auto& screen_data : m_screen_data) {
+        if (screen_data.m_screen_number_overlay)
+            screen_data.m_screen_number_overlay->invalidate();
+    }
+}
+
+void Compositor::increment_show_screen_number(Badge<ClientConnection>)
+{
+    if (m_show_screen_number_count++ == 0) {
+        Screen::for_each([&](auto& screen) {
+            auto& screen_data = m_screen_data[screen.index()];
+            VERIFY(!screen_data.m_screen_number_overlay);
+            screen_data.m_screen_number_overlay = create_overlay<ScreenNumberOverlay>(screen);
+            screen_data.m_screen_number_overlay->set_enabled(true);
+            return IterationDecision::Continue;
+        });
+    }
+}
+void Compositor::decrement_show_screen_number(Badge<ClientConnection>)
+{
+    if (--m_show_screen_number_count == 0) {
+        invalidate_current_screen_number_rects();
+        for (auto& screen_data : m_screen_data)
+            screen_data.m_screen_number_overlay = nullptr;
+    }
 }
 
 bool Compositor::any_opaque_window_above_this_one_contains_rect(const Window& a_window, const Gfx::IntRect& rect)
@@ -991,6 +977,51 @@ bool Compositor::any_opaque_window_above_this_one_contains_rect(const Window& a_
     return found_containing_window;
 };
 
+void Compositor::overlays_theme_changed()
+{
+    for (auto& overlay : m_overlay_list)
+        overlay.theme_changed();
+    overlay_rects_changed();
+}
+
+void Compositor::overlay_rects_changed()
+{
+    if (m_overlay_rects_changed)
+        return;
+
+    m_overlay_rects_changed = true;
+    m_invalidated_any = true;
+    invalidate_occlusions();
+    for (auto& rect : m_overlay_rects.rects())
+        invalidate_screen(rect);
+}
+
+void Compositor::recompute_overlay_rects()
+{
+    // The purpose of this is to gather all areas that we will render over
+    // regular window contents. This effectively just forces those areas to
+    // be rendered as transparency areas, which allows us to render these
+    // flicker-free.
+    m_overlay_rects.clear_with_capacity();
+    for (auto& overlay : m_overlay_list) {
+        auto& render_rect = overlay.rect();
+        m_overlay_rects.add(render_rect);
+
+        // Save the rectangle we are using for rendering from now on
+        overlay.did_recompute_occlusions();
+
+        // Cache which screens this overlay are rendered on
+        overlay.m_screens.clear_with_capacity();
+        Screen::for_each([&](auto& screen) {
+            if (render_rect.intersects(screen.rect()))
+                overlay.m_screens.append(&screen);
+            return IterationDecision::Continue;
+        });
+
+        invalidate_screen(render_rect);
+    }
+}
+
 void Compositor::recompute_occlusions()
 {
     auto& wm = WindowManager::the();
@@ -1006,7 +1037,16 @@ void Compositor::recompute_occlusions()
         return IterationDecision::Continue;
     });
 
-    dbgln_if(OCCLUSIONS_DEBUG, "OCCLUSIONS:");
+    if (m_overlay_rects_changed) {
+        m_overlay_rects_changed = false;
+        recompute_overlay_rects();
+    }
+
+    if constexpr (OCCLUSIONS_DEBUG) {
+        dbgln("OCCLUSIONS:");
+        for (auto& rect : m_overlay_rects.rects())
+            dbgln("  overlay: {}", rect);
+    }
 
     auto& main_screen = Screen::main();
     if (auto* fullscreen_window = wm.active_fullscreen_window()) {
@@ -1125,6 +1165,13 @@ void Compositor::recompute_occlusions()
 
                 return IterationDecision::Continue;
             });
+
+            if (!m_overlay_rects.is_empty() && m_overlay_rects.intersects(visible_opaque)) {
+                // In order to render overlays flicker-free we need to force these area into the
+                // temporary transparency rendering buffer
+                transparency_rects.add(m_overlay_rects.intersected(visible_opaque));
+                visible_opaque = visible_opaque.shatter(m_overlay_rects);
+            }
 
             bool have_opaque = !visible_opaque.is_empty();
             if (!transparency_rects.is_empty())

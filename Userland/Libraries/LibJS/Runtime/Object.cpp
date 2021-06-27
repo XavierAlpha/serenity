@@ -278,7 +278,7 @@ Value Object::get_own_property(const PropertyName& property_name, Value receiver
         if (value_here.is_accessor())
             return value_here.as_accessor().call_getter(receiver);
         if (value_here.is_native_property())
-            return call_native_property_getter(value_here.as_native_property(), this);
+            return call_native_property_getter(value_here.as_native_property(), receiver);
     }
     return value_here;
 }
@@ -438,11 +438,13 @@ Value Object::get_own_property_descriptor_object(const PropertyName& property_na
     if (descriptor.is_data_descriptor()) {
         descriptor_object->define_property(vm.names.value, descriptor.value.value_or(js_undefined()));
         descriptor_object->define_property(vm.names.writable, Value(descriptor.attributes.is_writable()));
-    } else {
-        VERIFY(descriptor.is_accessor_descriptor());
+    }
+
+    if (descriptor.is_accessor_descriptor()) {
         descriptor_object->define_property(vm.names.get, descriptor.getter ? Value(descriptor.getter) : js_undefined());
         descriptor_object->define_property(vm.names.set, descriptor.setter ? Value(descriptor.setter) : js_undefined());
     }
+
     descriptor_object->define_property(vm.names.enumerable, Value(descriptor.attributes.is_enumerable()));
     descriptor_object->define_property(vm.names.configurable, Value(descriptor.attributes.is_configurable()));
     return descriptor_object;
@@ -491,7 +493,8 @@ bool Object::define_property(const StringOrSymbol& property_name, const Object& 
         Function* getter_function { nullptr };
         Function* setter_function { nullptr };
 
-        auto existing_property = get_without_side_effects(property_name).value_or(js_undefined());
+        // We should only take previous getters for our own object not from any prototype
+        auto existing_property = get_own_property(property_name, {}, AllowSideEffects::No).value_or(js_undefined());
 
         if (getter.is_function()) {
             getter_function = &getter.as_function();
@@ -937,7 +940,9 @@ bool Object::put_by_index(u32 property_index, Value value)
                 return true;
             }
             if (value_here.value.is_native_property()) {
-                call_native_property_setter(value_here.value.as_native_property(), this, value);
+                // FIXME: Why doesn't put_by_index() receive the receiver value from put()?!
+                auto receiver = this;
+                call_native_property_setter(value_here.value.as_native_property(), receiver, value);
                 return true;
             }
         }
@@ -974,7 +979,7 @@ bool Object::put(const PropertyName& property_name, Value value, Value receiver)
                 return true;
             }
             if (value_here.is_native_property()) {
-                call_native_property_setter(value_here.as_native_property(), this, value);
+                call_native_property_setter(value_here.as_native_property(), receiver, value);
                 return true;
             }
         }
@@ -1118,21 +1123,6 @@ Value Object::ordinary_to_primitive(Value::PreferredType preferred_type) const
     }
     vm.throw_exception<TypeError>(global_object(), ErrorType::Convert, "object", preferred_type == Value::PreferredType::String ? "string" : "number");
     return {};
-}
-
-// 20.5.8.1 InstallErrorCause ( O, options ), https://tc39.es/proposal-error-cause/#sec-errorobjects-install-error-cause
-void Object::install_error_cause(Value options)
-{
-    auto& vm = this->vm();
-    if (!options.is_object())
-        return;
-    auto& options_object = options.as_object();
-    if (!options_object.has_property(vm.names.cause))
-        return;
-    auto cause = options_object.get(vm.names.cause).value_or(js_undefined());
-    if (vm.exception())
-        return;
-    define_property(vm.names.cause, cause, Attribute::Writable | Attribute::Configurable);
 }
 
 Value Object::invoke_internal(const StringOrSymbol& property_name, Optional<MarkedValueList> arguments)

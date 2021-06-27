@@ -58,6 +58,10 @@ ClientConnection::ClientConnection(NonnullRefPtr<Core::LocalSocket> client_socke
 
 ClientConnection::~ClientConnection()
 {
+    auto& wm = WindowManager::the();
+    if (wm.dnd_client() == this)
+        wm.end_dnd_drag();
+
     if (m_has_display_link)
         Compositor::the().decrement_display_link_count({});
 
@@ -68,6 +72,9 @@ ClientConnection::~ClientConnection()
         if (window.value->type() == WindowType::Applet)
             AppletManager::the().remove_applet(window.value);
     }
+
+    if (m_show_screen_number)
+        Compositor::the().decrement_show_screen_number({});
 }
 
 void ClientConnection::die()
@@ -314,6 +321,17 @@ Messages::WindowServer::SaveScreenLayoutResponse ClientConnection::save_screen_l
     String error_msg;
     bool success = WindowManager::the().save_screen_layout(error_msg);
     return { success, move(error_msg) };
+}
+
+void ClientConnection::show_screen_numbers(bool show)
+{
+    if (m_show_screen_number == show)
+        return;
+    m_show_screen_number = show;
+    if (show)
+        Compositor::the().increment_show_screen_number({});
+    else
+        Compositor::the().decrement_show_screen_number({});
 }
 
 void ClientConnection::set_window_title(i32 window_id, String const& title)

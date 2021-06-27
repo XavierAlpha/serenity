@@ -19,6 +19,7 @@
 
 #include <Kernel/Arch/x86/CPUID.h>
 #include <Kernel/Arch/x86/Interrupts.h>
+#include <Kernel/Arch/x86/MSR.h>
 #include <Kernel/Arch/x86/Processor.h>
 #include <Kernel/Arch/x86/ProcessorInfo.h>
 #include <Kernel/Arch/x86/SafeMem.h>
@@ -108,6 +109,8 @@ UNMAP_AFTER_INIT void Processor::cpu_detect()
             set_feature(CPUFeature::NX);
         if (extended_processor_info.edx() & (1 << 27))
             set_feature(CPUFeature::RDTSCP);
+        if (extended_processor_info.edx() & (1 << 29))
+            set_feature(CPUFeature::LM);
         if (extended_processor_info.edx() & (1 << 11)) {
             // Only available in 64 bit mode
             set_feature(CPUFeature::SYSCALL);
@@ -259,6 +262,8 @@ String Processor::features_string() const
             return "xsave";
         case CPUFeature::AVX:
             return "avx";
+        case CPUFeature::LM:
+            return "lm";
             // no default statement here intentionally so that we get
             // a warning if a new feature is forgotten to be added here
         }
@@ -354,7 +359,7 @@ void Processor::write_raw_gdt_entry(u16 selector, u32 low, u32 high)
     u16 i = (selector & 0xfffc) >> 3;
     u32 prev_gdt_length = m_gdt_length;
 
-    if (i > m_gdt_length) {
+    if (i >= m_gdt_length) {
         m_gdt_length = i + 1;
         VERIFY(m_gdt_length <= sizeof(m_gdt) / sizeof(m_gdt[0]));
         m_gdtr.limit = (m_gdt_length + 1) * 8 - 1;
@@ -1056,11 +1061,17 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     m_gdtr.limit = 0;
 
     write_raw_gdt_entry(0x0000, 0x00000000, 0x00000000);
+#if ARCH(I386)
     write_raw_gdt_entry(GDT_SELECTOR_CODE0, 0x0000ffff, 0x00cf9a00); // code0
     write_raw_gdt_entry(GDT_SELECTOR_DATA0, 0x0000ffff, 0x00cf9200); // data0
     write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00cffa00); // code3
     write_raw_gdt_entry(GDT_SELECTOR_DATA3, 0x0000ffff, 0x00cff200); // data3
+#else
+    write_raw_gdt_entry(GDT_SELECTOR_CODE0, 0x0000ffff, 0x00ef9a00); // code0
+    write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00effa00); // code3
+#endif
 
+#if ARCH(I386)
     Descriptor tls_descriptor {};
     tls_descriptor.low = tls_descriptor.high = 0;
     tls_descriptor.dpl = 3;
@@ -1074,7 +1085,7 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
 
     Descriptor fs_descriptor {};
     fs_descriptor.set_base(VirtualAddress { this });
-    fs_descriptor.set_limit(sizeof(Processor));
+    fs_descriptor.set_limit(sizeof(Processor) - 1);
     fs_descriptor.dpl = 0;
     fs_descriptor.segment_present = 1;
     fs_descriptor.granularity = 0;
@@ -1083,10 +1094,11 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     fs_descriptor.descriptor_type = 1;
     fs_descriptor.type = 2;
     write_gdt_entry(GDT_SELECTOR_PROC, fs_descriptor); // fs0
+#endif
 
     Descriptor tss_descriptor {};
-    tss_descriptor.set_base(VirtualAddress { &m_tss });
-    tss_descriptor.set_limit(sizeof(TSS32));
+    tss_descriptor.set_base(VirtualAddress { (size_t)&m_tss & 0xffffffff });
+    tss_descriptor.set_limit(sizeof(TSS) - 1);
     tss_descriptor.dpl = 0;
     tss_descriptor.segment_present = 1;
     tss_descriptor.granularity = 0;
@@ -1096,9 +1108,21 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     tss_descriptor.type = 9;
     write_gdt_entry(GDT_SELECTOR_TSS, tss_descriptor); // tss
 
+#if ARCH(X86_64)
+    Descriptor tss_descriptor_part2 {};
+    tss_descriptor_part2.low = (size_t)&m_tss >> 32;
+    write_gdt_entry(GDT_SELECTOR_TSS_PART2, tss_descriptor_part2);
+#endif
+
     flush_gdt();
     load_task_register(GDT_SELECTOR_TSS);
 
+#if ARCH(X86_64)
+    MSR fs_base(MSR_FS_BASE);
+    fs_base.set((size_t)this & 0xffffffff, (size_t)this >> 32);
+#endif
+
+#if ARCH(I386)
     asm volatile(
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
@@ -1107,7 +1131,6 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
         : "memory");
     set_fs(GDT_SELECTOR_PROC);
 
-#if ARCH(I386)
     // Make sure CS points to the kernel code descriptor.
     // clang-format off
     asm volatile(

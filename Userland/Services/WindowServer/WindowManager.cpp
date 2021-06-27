@@ -85,6 +85,18 @@ void WindowManager::reload_config()
     reload_cursor(m_wait_cursor, "Wait");
     reload_cursor(m_crosshair_cursor, "Crosshair");
 
+    auto reload_graphic = [&](RefPtr<MultiScaleBitmaps>& bitmap, String const& name) {
+        if (bitmap) {
+            if (!bitmap->load(name))
+                bitmap = nullptr;
+        } else {
+            bitmap = MultiScaleBitmaps::create(name);
+        }
+    };
+
+    reload_graphic(m_overlay_rect_shadow, m_config->read_entry("Graphics", "OverlayRectShadow"));
+    Compositor::the().invalidate_after_theme_or_font_change();
+
     WindowFrame::reload_config();
 }
 
@@ -244,6 +256,8 @@ void WindowManager::do_move_to_front(Window& window, bool make_active, bool make
 
 void WindowManager::remove_window(Window& window)
 {
+
+    check_hide_geometry_overlay(window);
     m_window_stack.remove(window);
     auto* active = active_window();
     auto* active_input = active_input_window();
@@ -469,6 +483,12 @@ bool WindowManager::pick_new_active_window(Window* previous_active)
     return new_window_picked;
 }
 
+void WindowManager::check_hide_geometry_overlay(Window& window)
+{
+    if (&window == m_move_window.ptr() || &window == m_resize_window.ptr())
+        m_geometry_overlay = nullptr;
+}
+
 void WindowManager::start_window_move(Window& window, Gfx::IntPoint const& origin)
 {
     MenuManager::the().close_everyone();
@@ -480,6 +500,8 @@ void WindowManager::start_window_move(Window& window, Gfx::IntPoint const& origi
     m_move_window->set_default_positioned(false);
     m_move_origin = origin;
     m_move_window_origin = window.position();
+    m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
+    m_geometry_overlay->set_enabled(true);
     window.invalidate(true, true);
 }
 
@@ -519,6 +541,8 @@ void WindowManager::start_window_resize(Window& window, Gfx::IntPoint const& pos
     m_resize_window = window;
     m_resize_origin = position;
     m_resize_window_original_rect = window.rect();
+    m_geometry_overlay = Compositor::the().create_overlay<WindowGeometryOverlay>(window);
+    m_geometry_overlay->set_enabled(true);
 
     m_active_input_tracking_window = nullptr;
 
@@ -551,6 +575,7 @@ bool WindowManager::process_ongoing_window_move(MouseEvent& event)
             }
         }
         m_move_window = nullptr;
+        m_geometry_overlay = nullptr;
         return true;
     }
     if (event.type() == Event::MouseMove) {
@@ -611,6 +636,8 @@ bool WindowManager::process_ongoing_window_move(MouseEvent& event)
                 m_move_window_origin = m_move_window->position();
             }
         }
+
+        m_geometry_overlay->window_rect_changed();
     }
     return true;
 }
@@ -628,6 +655,7 @@ bool WindowManager::process_ongoing_window_resize(MouseEvent const& event)
             dbgln_if(RESIZE_DEBUG, "Should Maximize vertically");
             m_resize_window->set_vertically_maximized();
             m_resize_window = nullptr;
+            m_geometry_overlay = nullptr;
             m_resizing_mouse_button = MouseButton::None;
             return true;
         }
@@ -635,6 +663,7 @@ bool WindowManager::process_ongoing_window_resize(MouseEvent const& event)
         Core::EventLoop::current().post_event(*m_resize_window, make<ResizeEvent>(m_resize_window->rect()));
         m_resize_window->invalidate(true, true);
         m_resize_window = nullptr;
+        m_geometry_overlay = nullptr;
         m_resizing_mouse_button = MouseButton::None;
         return true;
     }
@@ -736,6 +765,7 @@ bool WindowManager::process_ongoing_window_resize(MouseEvent const& event)
     dbgln_if(RESIZE_DEBUG, "[WM] Resizing, original: {}, now: {}", m_resize_window_original_rect, new_rect);
 
     m_resize_window->set_rect(new_rect);
+    m_geometry_overlay->window_rect_changed();
     Core::EventLoop::current().post_event(*m_resize_window, make<ResizeEvent>(new_rect));
     return true;
 }
@@ -746,6 +776,8 @@ bool WindowManager::process_ongoing_drag(MouseEvent& event)
         return false;
 
     if (event.type() == Event::MouseMove) {
+        m_dnd_overlay->cursor_moved();
+
         // We didn't let go of the drag yet, see if we should send some drag move events..
         m_window_stack.for_each_visible_window_from_front_to_back([&](Window& window) {
             if (!window.rect().contains(event.position()))
@@ -1186,6 +1218,12 @@ void WindowManager::process_key_event(KeyEvent& event)
         return;
     }
 
+    // FIXME: This is fragile, the kernel should send a signal when we switch back to the WindowManager's framebuffer
+    if (event.type() == Event::KeyDown && (event.modifiers() & Mod_Alt) && (event.key() == Key_ExclamationPoint || event.key() == Key_1)) {
+        Compositor::the().invalidate_screen();
+        return;
+    }
+
     if (event.type() == Event::KeyDown && (event.modifiers() == (Mod_Ctrl | Mod_Super | Mod_Shift) && event.key() == Key_I)) {
         reload_icon_bitmaps_after_scale_change();
         Compositor::the().invalidate_screen();
@@ -1487,7 +1525,8 @@ void WindowManager::start_dnd_drag(ClientConnection& client, String const& text,
     VERIFY(!m_dnd_client);
     m_dnd_client = client;
     m_dnd_text = text;
-    m_dnd_bitmap = bitmap;
+    m_dnd_overlay = Compositor::the().create_overlay<DndOverlay>(text, bitmap);
+    m_dnd_overlay->set_enabled(true);
     m_dnd_mime_data = mime_data;
     Compositor::the().invalidate_cursor();
     m_active_input_tracking_window = nullptr;
@@ -1499,17 +1538,7 @@ void WindowManager::end_dnd_drag()
     Compositor::the().invalidate_cursor();
     m_dnd_client = nullptr;
     m_dnd_text = {};
-    m_dnd_bitmap = nullptr;
-}
-
-Gfx::IntRect WindowManager::dnd_rect() const
-{
-    int bitmap_width = m_dnd_bitmap ? m_dnd_bitmap->width() : 0;
-    int bitmap_height = m_dnd_bitmap ? m_dnd_bitmap->height() : 0;
-    int width = font().width(m_dnd_text) + bitmap_width;
-    int height = max((int)font().glyph_height(), bitmap_height);
-    auto location = Compositor::the().current_cursor_rect().center().translated(8, 8);
-    return Gfx::IntRect(location, { width, height }).inflated(16, 8);
+    m_dnd_overlay = nullptr;
 }
 
 void WindowManager::invalidate_after_theme_or_font_change()
@@ -1525,8 +1554,7 @@ void WindowManager::invalidate_after_theme_or_font_change()
     });
     MenuManager::the().did_change_theme();
     AppletManager::the().did_change_theme();
-    Compositor::the().invalidate_occlusions();
-    Compositor::the().invalidate_screen();
+    Compositor::the().invalidate_after_theme_or_font_change();
 }
 
 bool WindowManager::update_theme(String theme_path, String theme_name)

@@ -73,7 +73,7 @@ void ArrayPrototype::initialize(GlobalObject& global_object)
     // Object.is(Array.prototype[Symbol.iterator], Array.prototype.values)
     // evaluates to true
     // 23.1.3.33 Array.prototype [ @@iterator ] ( ), https://tc39.es/ecma262/#sec-array.prototype-@@iterator
-    define_property(vm.well_known_symbol_iterator(), get(vm.names.values), attr);
+    define_property(*vm.well_known_symbol_iterator(), get(vm.names.values), attr);
 
     // 23.1.3.34 Array.prototype [ @@unscopables ], https://tc39.es/ecma262/#sec-array.prototype-@@unscopables
     auto* unscopable_list = Object::create(global_object, nullptr);
@@ -88,7 +88,7 @@ void ArrayPrototype::initialize(GlobalObject& global_object)
     unscopable_list->define_property(vm.names.keys, Value(true));
     unscopable_list->define_property(vm.names.values, Value(true));
 
-    define_property(vm.well_known_symbol_unscopables(), unscopable_list, Attribute::Configurable);
+    define_property(*vm.well_known_symbol_unscopables(), unscopable_list, Attribute::Configurable);
 }
 
 ArrayPrototype::~ArrayPrototype()
@@ -161,7 +161,7 @@ static Object* array_species_create(GlobalObject& global_object, Object& origina
     }
 
     if (constructor.is_object()) {
-        constructor = constructor.as_object().get(vm.well_known_symbol_species()).value_or(js_undefined());
+        constructor = constructor.as_object().get(*vm.well_known_symbol_species()).value_or(js_undefined());
         if (vm.exception())
             return {};
         if (constructor.is_null())
@@ -524,7 +524,7 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayPrototype::concat)
         if (vm.exception())
             return false;
 
-        auto spreadable = object->get(vm.well_known_symbol_is_concat_spreadable()).value_or(js_undefined());
+        auto spreadable = object->get(*vm.well_known_symbol_is_concat_spreadable()).value_or(js_undefined());
         if (vm.exception())
             return false;
 
@@ -646,12 +646,12 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayPrototype::slice)
     size_t index = 0;
 
     while (actual_start < final) {
-        bool present = this_object->has_property(actual_start);
+        bool present = this_object->has_property((u32)actual_start);
         if (vm.exception())
             return {};
 
         if (present) {
-            auto value = this_object->get(actual_start).value_or(js_undefined());
+            auto value = this_object->get((u32)actual_start).value_or(js_undefined());
             if (vm.exception())
                 return {};
 
@@ -1047,13 +1047,16 @@ JS_DEFINE_NATIVE_FUNCTION(ArrayPrototype::last_index_of)
         return Value(-1);
     i32 from_index = length - 1;
     if (vm.argument_count() >= 2) {
-        from_index = vm.argument(1).to_i32(global_object);
+        double from_argument = vm.argument(1).to_integer_or_infinity(global_object);
         if (vm.exception())
             return {};
-        if (from_index >= 0)
-            from_index = min(from_index, length - 1);
+        if (vm.argument(1).is_negative_infinity()) {
+            return Value(-1);
+        }
+        if (from_argument >= 0)
+            from_index = min(from_argument, length - 1.);
         else
-            from_index = length + from_index;
+            from_index = length + from_argument;
     }
     auto search_element = vm.argument(0);
     for (i32 i = from_index; i >= 0; --i) {

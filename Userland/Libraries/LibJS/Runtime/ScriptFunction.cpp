@@ -55,12 +55,19 @@ ScriptFunction::ScriptFunction(GlobalObject& global_object, const FlyString& nam
     , m_name(name)
     , m_body(body)
     , m_parameters(move(parameters))
-    , m_parent_scope(parent_scope)
+    , m_environment(parent_scope)
     , m_function_length(function_length)
     , m_kind(kind)
     , m_is_strict(is_strict)
     , m_is_arrow_function(is_arrow_function)
 {
+    // NOTE: This logic is from OrdinaryFunctionCreate, https://tc39.es/ecma262/#sec-ordinaryfunctioncreate
+    if (m_is_arrow_function)
+        set_this_mode(ThisMode::Lexical);
+    else if (m_is_strict)
+        set_this_mode(ThisMode::Strict);
+    else
+        set_this_mode(ThisMode::Global);
 }
 
 void ScriptFunction::initialize(GlobalObject& global_object)
@@ -91,10 +98,10 @@ ScriptFunction::~ScriptFunction()
 void ScriptFunction::visit_edges(Visitor& visitor)
 {
     Function::visit_edges(visitor);
-    visitor.visit(m_parent_scope);
+    visitor.visit(m_environment);
 }
 
-FunctionEnvironmentRecord* ScriptFunction::create_environment_record()
+FunctionEnvironmentRecord* ScriptFunction::create_environment_record(Function& function_being_invoked)
 {
     HashMap<FlyString, Variable> variables;
     for (auto& parameter : m_parameters) {
@@ -123,11 +130,11 @@ FunctionEnvironmentRecord* ScriptFunction::create_environment_record()
         }
     }
 
-    auto* environment = heap().allocate<FunctionEnvironmentRecord>(global_object(), m_parent_scope, variables);
-    environment->set_function_object(*this);
+    auto* environment = heap().allocate<FunctionEnvironmentRecord>(global_object(), m_environment, variables);
+    environment->set_function_object(function_being_invoked);
     if (m_is_arrow_function) {
-        if (is<FunctionEnvironmentRecord>(m_parent_scope))
-            environment->set_new_target(static_cast<FunctionEnvironmentRecord*>(m_parent_scope)->new_target());
+        if (is<FunctionEnvironmentRecord>(m_environment))
+            environment->set_new_target(static_cast<FunctionEnvironmentRecord*>(m_environment)->new_target());
     }
     return environment;
 }
@@ -163,9 +170,6 @@ Value ScriptFunction::execute_function_body()
                         argument_value = js_undefined();
                     }
 
-                    if (i >= execution_context_arguments.size())
-                        execution_context_arguments.resize(i + 1);
-                    execution_context_arguments[i] = argument_value;
                     vm.assign(param, argument_value, global_object(), true, vm.lexical_environment());
                 });
 

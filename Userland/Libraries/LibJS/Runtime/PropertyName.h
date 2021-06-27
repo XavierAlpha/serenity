@@ -30,9 +30,9 @@ public:
         if (value.is_empty())
             return {};
         if (value.is_symbol())
-            return &value.as_symbol();
-        if (value.is_integral_number() && value.as_i32() >= 0)
-            return value.as_i32();
+            return value.as_symbol();
+        if (value.is_integral_number() && value.as_double() >= 0 && value.as_double() <= NumericLimits<u32>::max())
+            return value.as_u32();
         auto string = value.to_string(global_object);
         if (string.is_null())
             return {};
@@ -41,11 +41,16 @@ public:
 
     PropertyName() { }
 
-    PropertyName(i32 index)
+    template<Integral T>
+    PropertyName(T index)
         : m_type(Type::Number)
         , m_number(index)
     {
+        // FIXME: Replace this with requires(IsUnsigned<T>)?
+        //        Needs changes in various places using `int` (but not actually being in the negative range)
         VERIFY(index >= 0);
+        if constexpr (NumericLimits<T>::max() > NumericLimits<u32>::max())
+            VERIFY(index <= NumericLimits<u32>::max());
     }
 
     PropertyName(char const* chars)
@@ -69,11 +74,10 @@ public:
         VERIFY(!string.is_null());
     }
 
-    PropertyName(Symbol* symbol)
+    PropertyName(Symbol& symbol)
         : m_type(Type::Symbol)
-        , m_symbol(symbol)
+        , m_symbol(&symbol)
     {
-        VERIFY(symbol);
     }
 
     PropertyName(StringOrSymbol const& string_or_symbol)
@@ -126,13 +130,13 @@ public:
             return false;
         }
 
-        i32 property_index = m_string.to_int(TrimWhitespace::No).value_or(-1);
-        if (property_index < 0) {
+        auto property_index = m_string.to_uint(TrimWhitespace::No);
+        if (!property_index.has_value()) {
             m_string_may_be_number = false;
             return false;
         }
         m_type = Type::Number;
-        m_number = property_index;
+        m_number = *property_index;
         return true;
     }
 

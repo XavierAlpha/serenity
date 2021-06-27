@@ -37,6 +37,8 @@ class Window;
 class ClientConnection;
 class WindowSwitcher;
 class Button;
+class DndOverlay;
+class WindowGeometryOverlay;
 
 enum class ResizeDirection {
     None,
@@ -83,10 +85,7 @@ public:
     Gfx::IntRect maximized_window_rect(Window const&, bool relative_to_window_screen = false) const;
 
     ClientConnection const* dnd_client() const { return m_dnd_client.ptr(); }
-    String const& dnd_text() const { return m_dnd_text; }
     Core::MimeData const& dnd_mime_data() const { return *m_dnd_mime_data; }
-    Gfx::Bitmap const* dnd_bitmap() const { return m_dnd_bitmap; }
-    Gfx::IntRect dnd_rect() const;
 
     void start_dnd_drag(ClientConnection&, String const& text, Gfx::Bitmap const*, Core::MimeData const&);
     void end_dnd_drag();
@@ -160,6 +159,8 @@ public:
 
     bool is_active_window_or_accessory(Window&) const;
 
+    void check_hide_geometry_overlay(Window&);
+
     void start_window_resize(Window&, Gfx::IntPoint const&, MouseButton);
     void start_window_resize(Window&, MouseEvent const&);
     void start_window_move(Window&, MouseEvent const&);
@@ -231,6 +232,8 @@ public:
 
     WindowStack& window_stack() { return m_window_stack; }
 
+    MultiScaleBitmaps const* overlay_rect_shadow() const { return m_overlay_rect_shadow.ptr(); }
+
 private:
     RefPtr<Cursor> get_cursor(String const& name);
 
@@ -272,6 +275,8 @@ private:
     RefPtr<Cursor> m_drag_cursor;
     RefPtr<Cursor> m_wait_cursor;
     RefPtr<Cursor> m_crosshair_cursor;
+
+    RefPtr<MultiScaleBitmaps> m_overlay_rect_shadow;
 
     WindowStack m_window_stack;
 
@@ -315,6 +320,7 @@ private:
     WeakPtr<Window> m_active_input_tracking_window;
     WeakPtr<Window> m_window_with_active_menu;
 
+    OwnPtr<WindowGeometryOverlay> m_geometry_overlay;
     WeakPtr<Window> m_move_window;
     Gfx::IntPoint m_move_origin;
     Gfx::IntPoint m_move_window_origin;
@@ -337,10 +343,11 @@ private:
 
     RefPtr<Core::ConfigFile> m_config;
 
+    OwnPtr<DndOverlay> m_dnd_overlay;
     WeakPtr<ClientConnection> m_dnd_client;
     String m_dnd_text;
+
     RefPtr<Core::MimeData> m_dnd_mime_data;
-    RefPtr<Gfx::Bitmap> m_dnd_bitmap;
 };
 
 template<typename Callback>

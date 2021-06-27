@@ -162,6 +162,8 @@ public:
         return running_execution_context().this_value;
     }
 
+    Value resolve_this_binding(GlobalObject&);
+
     Value last_value() const { return m_last_value; }
     void set_last_value(Badge<Bytecode::Interpreter>, Value value) { m_last_value = value; }
     void set_last_value(Badge<Interpreter>, Value value) { m_last_value = value; }
@@ -202,7 +204,7 @@ public:
     void assign(const FlyString& target, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
     void assign(const NonnullRefPtr<BindingPattern>& target, Value, GlobalObject&, bool first_assignment = false, EnvironmentRecord* specific_scope = nullptr);
 
-    Reference get_reference(const FlyString& name);
+    Reference resolve_binding(GlobalObject&, FlyString const&, EnvironmentRecord* = nullptr);
 
     template<typename T, typename... Args>
     void throw_exception(GlobalObject& global_object, Args&&... args)
