@@ -21,7 +21,7 @@
 #include <LibJS/Runtime/BooleanObject.h>
 #include <LibJS/Runtime/BoundFunction.h>
 #include <LibJS/Runtime/Error.h>
-#include <LibJS/Runtime/Function.h>
+#include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/NumberObject.h>
@@ -229,10 +229,10 @@ bool Value::is_function() const
     return is_object() && as_object().is_function();
 }
 
-Function& Value::as_function()
+FunctionObject& Value::as_function()
 {
     VERIFY(is_function());
-    return static_cast<Function&>(as_object());
+    return static_cast<FunctionObject&>(as_object());
 }
 
 // 7.2.4 IsConstructor ( argument ), https://tc39.es/ecma262/#sec-isconstructor
@@ -242,7 +242,7 @@ bool Value::is_constructor() const
         return false;
     if (is<NativeFunction>(as_object()))
         return static_cast<const NativeFunction&>(as_object()).has_constructor();
-    // ScriptFunction or BoundFunction
+    // OrdinaryFunctionObject or BoundFunction
     return true;
 }
 
@@ -637,7 +637,9 @@ u32 Value::to_u32(GlobalObject& global_object) const
     if (signbit(value))
         int_val = -int_val;
     auto int32bit = fmod(int_val, NumericLimits<u32>::max() + 1.0);
-    return static_cast<u32>(int32bit);
+    // Cast to i64 here to ensure that the double --> u32 cast doesn't invoke undefined behavior
+    // Otherwise, negative numbers cause a UBSAN warning.
+    return static_cast<u32>(static_cast<i64>(int32bit));
 }
 
 // 7.1.8 ToInt16 ( argument ), https://tc39.es/ecma262/#sec-toint16
@@ -806,7 +808,7 @@ Value Value::get(GlobalObject& global_object, PropertyName const& property_name)
 }
 
 // 7.3.10 GetMethod ( V, P ), https://tc39.es/ecma262/#sec-getmethod
-Function* Value::get_method(GlobalObject& global_object, PropertyName const& property_name) const
+FunctionObject* Value::get_method(GlobalObject& global_object, PropertyName const& property_name) const
 {
     auto& vm = global_object.vm();
 
@@ -1018,7 +1020,7 @@ Value right_shift(GlobalObject& global_object, Value lhs, Value rhs)
         if (!rhs_numeric.is_finite_number())
             return lhs_numeric;
         auto lhs_i32 = lhs_numeric.to_i32(global_object);
-        auto rhs_u32 = rhs_numeric.to_u32(global_object);
+        auto rhs_u32 = rhs_numeric.to_u32(global_object) % 32;
         return Value(lhs_i32 >> rhs_u32);
     }
     if (both_bigint(lhs_numeric, rhs_numeric)) {

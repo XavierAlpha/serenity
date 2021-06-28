@@ -100,8 +100,32 @@ static EntropySource s_entropy_source_interrupts { EntropySource::Static::Interr
     asm(                                            \
         ".globl " #title "_asm_entry\n"             \
         "" #title "_asm_entry: \n"                  \
-        "    cli;hlt;\n"                            \
-);
+        "    pushq %r15\n"                          \
+        "    pushq %r14\n"                          \
+        "    pushq %r13\n"                          \
+        "    pushq %r12\n"                          \
+        "    pushq %r11\n"                          \
+        "    pushq %r10\n"                          \
+        "    pushq %r9\n"                           \
+        "    pushq %r8\n"                           \
+        "    pushq %rax\n"                          \
+        "    pushq %rcx\n"                          \
+        "    pushq %rdx\n"                          \
+        "    pushq %rbx\n"                          \
+        "    pushq %rsp\n"                          \
+        "    pushq %rbp\n"                          \
+        "    pushq %rsi\n"                          \
+        "    pushq %rdi\n"                          \
+        "    pushq %rsp \n" /* set TrapFrame::regs */ \
+        "    subq $" __STRINGIFY(TRAP_FRAME_SIZE - 8) ", %rsp \n" \
+        "    subq $0x8, %rsp\n" /* align stack */   \
+        "    lea 0x8(%rsp), %rdi \n"                \
+        "    cld\n"                                 \
+        "    call enter_trap_no_irq \n"             \
+        "    lea 0x8(%rsp), %rdi \n"                \
+        "    call " #title "_handler\n"             \
+        "    addq $0x8, %rsp\n" /* undo alignment */\
+        "    jmp common_trap_exit \n");
 
 #define EH_ENTRY_NO_CODE(ec, title)                 \
     extern "C" void title##_handler(TrapFrame*);    \
@@ -109,14 +133,40 @@ static EntropySource s_entropy_source_interrupts { EntropySource::Static::Interr
 asm(                                                \
         ".globl " #title "_asm_entry\n"             \
         "" #title "_asm_entry: \n"                  \
-        "    cli;hlt;\n"                            \
-);
+        "    pushq $0x0\n"                          \
+        "    pushq %r15\n"                          \
+        "    pushq %r14\n"                          \
+        "    pushq %r13\n"                          \
+        "    pushq %r12\n"                          \
+        "    pushq %r11\n"                          \
+        "    pushq %r10\n"                          \
+        "    pushq %r9\n"                           \
+        "    pushq %r8\n"                           \
+        "    pushq %rax\n"                          \
+        "    pushq %rcx\n"                          \
+        "    pushq %rdx\n"                          \
+        "    pushq %rbx\n"                          \
+        "    pushq %rsp\n"                          \
+        "    pushq %rbp\n"                          \
+        "    pushq %rsi\n"                          \
+        "    pushq %rdi\n"                          \
+        "    pushq %rsp \n" /* set TrapFrame::regs */ \
+        "    subq $" __STRINGIFY(TRAP_FRAME_SIZE - 8) ", %rsp \n" \
+        "    subq $0x8, %rsp\n" /* align stack */   \
+        "    lea 0x8(%rsp), %rdi \n"                \
+        "    cld\n"                                 \
+        "    call enter_trap_no_irq \n"             \
+        "    lea 0x8(%rsp), %rdi \n"                \
+        "    call " #title "_handler\n"             \
+        "    addq $0x8, %rsp\n" /* undo alignment */\
+        "    jmp common_trap_exit \n");
 #endif
 
 // clang-format on
 
 static void dump(const RegisterState& regs)
 {
+#if ARCH(I386)
     u16 ss;
     u32 esp;
 
@@ -127,14 +177,33 @@ static void dump(const RegisterState& regs)
         ss = regs.userspace_ss;
         esp = regs.userspace_esp;
     }
+#else
+    u64 rsp;
+
+    if (!(regs.cs & 3))
+        rsp = regs.rsp;
+    else
+        rsp = regs.userspace_rsp;
+#endif
 
     dbgln("Exception code: {:04x} (isr: {:04x})", regs.exception_code, regs.isr_number);
+#if ARCH(I386)
     dbgln("    pc={:04x}:{:08x} eflags={:08x}", (u16)regs.cs, regs.eip, regs.eflags);
     dbgln(" stack={:04x}:{:08x}", ss, esp);
     dbgln("    ds={:04x} es={:04x} fs={:04x} gs={:04x}", (u16)regs.ds, (u16)regs.es, (u16)regs.fs, (u16)regs.gs);
     dbgln("   eax={:08x} ebx={:08x} ecx={:08x} edx={:08x}", regs.eax, regs.ebx, regs.ecx, regs.edx);
     dbgln("   ebp={:08x} esp={:08x} esi={:08x} edi={:08x}", regs.ebp, regs.esp, regs.esi, regs.edi);
     dbgln("   cr0={:08x} cr2={:08x} cr3={:08x} cr4={:08x}", read_cr0(), read_cr2(), read_cr3(), read_cr4());
+#else
+    dbgln("    pc={:04x}:{:16x} rflags={:16x}", (u16)regs.cs, regs.rip, regs.rflags);
+    dbgln(" stack={:16x}", rsp);
+    // FIXME: Add fs_base and gs_base here
+    dbgln("   rax={:16x} rbx={:16x} rcx={:16x} rdx={:16x}", regs.rax, regs.rbx, regs.rcx, regs.rdx);
+    dbgln("   rbp={:16x} rsp={:16x} rsi={:16x} rdi={:16x}", regs.rbp, regs.rsp, regs.rsi, regs.rdi);
+    dbgln("    r8={:16x}  r9={:16x} r10={:16x} r11={:16x}", regs.r8, regs.r9, regs.r10, regs.r11);
+    dbgln("   r12={:16x} r13={:16x} r14={:16x} r15={:16x}", regs.r12, regs.r13, regs.r14, regs.r15);
+    dbgln("   cr0={:16x} cr2={:16x} cr3={:16x} cr4={:16x}", read_cr0(), read_cr2(), read_cr3(), read_cr4());
+#endif
 }
 
 void handle_crash(RegisterState& regs, const char* description, int signal, bool out_of_memory)
@@ -155,7 +224,13 @@ void handle_crash(RegisterState& regs, const char* description, int signal, bool
         PANIC("Crash in ring 0");
     }
 
-    process->crash(signal, regs.eip, out_of_memory);
+    FlatPtr ip;
+#if ARCH(I386)
+    ip = regs.eip;
+#else
+    ip = regs.rip;
+#endif
+    process->crash(signal, ip, out_of_memory);
 }
 
 EH_ENTRY_NO_CODE(6, illegal_instruction);
@@ -237,8 +312,14 @@ void page_fault_handler(TrapFrame* trap)
             current_thread->set_handling_page_fault(false);
     };
 
-    if (!faulted_in_kernel && !MM.validate_user_stack(current_thread->process(), VirtualAddress(regs.userspace_esp))) {
-        dbgln("Invalid stack pointer: {}", VirtualAddress(regs.userspace_esp));
+    VirtualAddress userspace_sp;
+#if ARCH(I386)
+    userspace_sp = VirtualAddress { regs.userspace_esp };
+#else
+    userspace_sp = VirtualAddress { regs.userspace_rsp };
+#endif
+    if (!faulted_in_kernel && !MM.validate_user_stack(current_thread->process(), userspace_sp)) {
+        dbgln("Invalid stack pointer: {}", userspace_sp);
         handle_crash(regs, "Bad stack on page fault", SIGSTKFLT);
     }
 
@@ -504,18 +585,16 @@ void unregister_generic_interrupt_handler(u8 interrupt_number, GenericInterruptH
 
 UNMAP_AFTER_INIT void register_interrupt_handler(u8 index, void (*handler)())
 {
-    // FIXME: Why is that with selector 8?
     // FIXME: Is the Gate Type really required to be an Interrupt
     // FIXME: What's up with that storage segment 0?
-    s_idt[index] = IDTEntry((FlatPtr)handler, 8, IDTEntryType::InterruptGate32, 0, 0);
+    s_idt[index] = IDTEntry((FlatPtr)handler, GDT_SELECTOR_CODE0, IDTEntryType::InterruptGate32, 0, 0);
 }
 
 UNMAP_AFTER_INIT void register_user_callable_interrupt_handler(u8 index, void (*handler)())
 {
-    // FIXME: Why is that with selector 8?
     // FIXME: Is the Gate Type really required to be a Trap
     // FIXME: What's up with that storage segment 0?
-    s_idt[index] = IDTEntry((FlatPtr)handler, 8, IDTEntryType::TrapGate32, 0, 3);
+    s_idt[index] = IDTEntry((FlatPtr)handler, GDT_SELECTOR_CODE0, IDTEntryType::TrapGate32, 0, 3);
 }
 
 UNMAP_AFTER_INIT void flush_idt()

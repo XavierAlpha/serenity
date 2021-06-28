@@ -8,7 +8,7 @@
 
 #include <AK/StringBuilder.h>
 #include <LibJS/AST.h>
-#include <LibJS/Runtime/Function.h>
+#include <LibJS/Runtime/FunctionObject.h>
 #include <LibWeb/Bindings/EventWrapper.h>
 #include <LibWeb/Bindings/NodeWrapper.h>
 #include <LibWeb/Bindings/NodeWrapperFactory.h>
@@ -267,7 +267,7 @@ ExceptionOr<NonnullRefPtr<Node>> Node::pre_insert(NonnullRefPtr<Node> node, RefP
 {
     auto validity_result = ensure_pre_insertion_validity(node, child);
     if (validity_result.is_exception())
-        return NonnullRefPtr<DOMException>(validity_result.exception());
+        return validity_result.exception();
 
     auto reference_child = child;
     if (reference_child == node)

@@ -45,10 +45,10 @@ struct ScopeFrame {
 struct ExecutionContext {
     const ASTNode* current_node { nullptr };
     FlyString function_name;
-    Function* function { nullptr };
+    FunctionObject* function { nullptr };
     Value this_value;
     Vector<Value> arguments;
-    Array* arguments_object { nullptr };
+    Object* arguments_object { nullptr };
     EnvironmentRecord* lexical_environment { nullptr };
     EnvironmentRecord* variable_environment { nullptr };
     bool is_strict_mode { false };
@@ -224,14 +224,14 @@ public:
         return throw_exception(global_object, T::create(global_object, String::formatted(type.message(), forward<Args>(args)...)));
     }
 
-    Value construct(Function&, Function& new_target, Optional<MarkedValueList> arguments);
+    Value construct(FunctionObject&, FunctionObject& new_target, Optional<MarkedValueList> arguments);
 
     String join_arguments(size_t start_index = 0) const;
 
     Value get_new_target();
 
     template<typename... Args>
-    [[nodiscard]] ALWAYS_INLINE Value call(Function& function, Value this_value, Args... args)
+    [[nodiscard]] ALWAYS_INLINE Value call(FunctionObject& function, Value this_value, Args... args)
     {
         if constexpr (sizeof...(Args) > 0) {
             MarkedValueList arglist { heap() };
@@ -252,14 +252,14 @@ public:
 
     void promise_rejection_tracker(const Promise&, Promise::RejectionOperation) const;
 
-    AK::Function<void()> on_call_stack_emptied;
-    AK::Function<void(const Promise&)> on_promise_unhandled_rejection;
-    AK::Function<void(const Promise&)> on_promise_rejection_handled;
+    Function<void()> on_call_stack_emptied;
+    Function<void(const Promise&)> on_promise_unhandled_rejection;
+    Function<void(const Promise&)> on_promise_rejection_handled;
 
 private:
     VM();
 
-    [[nodiscard]] Value call_internal(Function&, Value this_value, Optional<MarkedValueList> arguments);
+    [[nodiscard]] Value call_internal(FunctionObject&, Value this_value, Optional<MarkedValueList> arguments);
 
     Exception* m_exception { nullptr };
 
@@ -294,13 +294,13 @@ private:
 };
 
 template<>
-[[nodiscard]] ALWAYS_INLINE Value VM::call(Function& function, Value this_value, MarkedValueList arguments) { return call_internal(function, this_value, move(arguments)); }
+[[nodiscard]] ALWAYS_INLINE Value VM::call(FunctionObject& function, Value this_value, MarkedValueList arguments) { return call_internal(function, this_value, move(arguments)); }
 
 template<>
-[[nodiscard]] ALWAYS_INLINE Value VM::call(Function& function, Value this_value, Optional<MarkedValueList> arguments) { return call_internal(function, this_value, move(arguments)); }
+[[nodiscard]] ALWAYS_INLINE Value VM::call(FunctionObject& function, Value this_value, Optional<MarkedValueList> arguments) { return call_internal(function, this_value, move(arguments)); }
 
 template<>
-[[nodiscard]] ALWAYS_INLINE Value VM::call(Function& function, Value this_value) { return call(function, this_value, Optional<MarkedValueList> {}); }
+[[nodiscard]] ALWAYS_INLINE Value VM::call(FunctionObject& function, Value this_value) { return call(function, this_value, Optional<MarkedValueList> {}); }
 
 ALWAYS_INLINE Heap& Cell::heap() const
 {

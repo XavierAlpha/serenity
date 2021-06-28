@@ -10,25 +10,25 @@
 
 namespace JS {
 
-NativeFunction* NativeFunction::create(GlobalObject& global_object, const FlyString& name, AK::Function<Value(VM&, GlobalObject&)> function)
+NativeFunction* NativeFunction::create(GlobalObject& global_object, const FlyString& name, Function<Value(VM&, GlobalObject&)> function)
 {
     return global_object.heap().allocate<NativeFunction>(global_object, name, move(function), *global_object.function_prototype());
 }
 
 NativeFunction::NativeFunction(Object& prototype)
-    : Function(prototype)
+    : FunctionObject(prototype)
 {
 }
 
-NativeFunction::NativeFunction(PropertyName const& name, AK::Function<Value(VM&, GlobalObject&)> native_function, Object& prototype)
-    : Function(prototype)
+NativeFunction::NativeFunction(PropertyName const& name, Function<Value(VM&, GlobalObject&)> native_function, Object& prototype)
+    : FunctionObject(prototype)
     , m_name(name.as_string())
     , m_native_function(move(native_function))
 {
 }
 
 NativeFunction::NativeFunction(PropertyName const& name, Object& prototype)
-    : Function(prototype)
+    : FunctionObject(prototype)
     , m_name(name.as_string())
 {
 }
@@ -42,12 +42,12 @@ Value NativeFunction::call()
     return m_native_function(vm(), global_object());
 }
 
-Value NativeFunction::construct(Function&)
+Value NativeFunction::construct(FunctionObject&)
 {
     return {};
 }
 
-FunctionEnvironmentRecord* NativeFunction::create_environment_record(Function&)
+FunctionEnvironmentRecord* NativeFunction::create_environment_record(FunctionObject&)
 {
     return nullptr;
 }

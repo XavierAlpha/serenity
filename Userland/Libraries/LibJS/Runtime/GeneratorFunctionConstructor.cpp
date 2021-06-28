@@ -12,7 +12,7 @@
 #include <LibJS/Runtime/FunctionConstructor.h>
 #include <LibJS/Runtime/GeneratorFunctionConstructor.h>
 #include <LibJS/Runtime/GlobalObject.h>
-#include <LibJS/Runtime/ScriptFunction.h>
+#include <LibJS/Runtime/OrdinaryFunctionObject.h>
 
 namespace JS {
 
@@ -43,7 +43,7 @@ Value GeneratorFunctionConstructor::call()
 }
 
 // 27.3.1.1 GeneratorFunction ( p1, p2, … , pn, body ), https://tc39.es/ecma262/#sec-generatorfunction
-Value GeneratorFunctionConstructor::construct(Function& new_target)
+Value GeneratorFunctionConstructor::construct(FunctionObject& new_target)
 {
     auto function = FunctionConstructor::create_dynamic_function_node(global_object(), new_target, FunctionKind::Generator);
     if (!function)
@@ -62,7 +62,7 @@ Value GeneratorFunctionConstructor::construct(Function& new_target)
             block.dump(executable);
     }
 
-    return ScriptFunction::create(global_object(), function->name(), function->body(), function->parameters(), function->function_length(), vm().lexical_environment(), FunctionKind::Generator, function->is_strict_mode(), false);
+    return OrdinaryFunctionObject::create(global_object(), function->name(), function->body(), function->parameters(), function->function_length(), vm().lexical_environment(), FunctionKind::Generator, function->is_strict_mode(), false);
 }
 
 }

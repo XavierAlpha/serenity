@@ -60,8 +60,8 @@ set(SOURCES
     Runtime/FinalizationRegistryConstructor.cpp
     Runtime/FinalizationRegistryPrototype.cpp
     Runtime/FunctionConstructor.cpp
-    Runtime/Function.cpp
     Runtime/FunctionEnvironmentRecord.cpp
+    Runtime/FunctionObject.cpp
     Runtime/FunctionPrototype.cpp
     Runtime/GeneratorFunctionConstructor.cpp
     Runtime/GeneratorFunctionPrototype.cpp
@@ -104,7 +104,7 @@ set(SOURCES
     Runtime/RegExpConstructor.cpp
     Runtime/RegExpObject.cpp
     Runtime/RegExpPrototype.cpp
-    Runtime/ScriptFunction.cpp
+        Runtime/OrdinaryFunctionObject.cpp
     Runtime/Set.cpp
     Runtime/SetConstructor.cpp
     Runtime/SetIterator.cpp

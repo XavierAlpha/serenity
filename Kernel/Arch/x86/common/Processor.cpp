@@ -40,6 +40,10 @@ Atomic<u32> Processor::s_idle_cpu_mask { 0 };
 extern "C" void thread_context_first_enter(void);
 extern "C" void exit_kernel_thread(void);
 
+// The compiler can't see the calls to this function inside assembly.
+// Declare it, to avoid dead code warnings.
+extern "C" void context_first_init(Thread* from_thread, Thread* to_thread, TrapFrame* trap) __attribute__((used));
+
 UNMAP_AFTER_INIT static void sse_init()
 {
     write_cr0((read_cr0() & 0xfffffffbu) | 0x2);
@@ -489,14 +493,10 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
             // pushed the callee-saved registers, and the last of them happens
             // to be ebp.
             ProcessPagingScope paging_scope(thread.process());
-            auto& tss = thread.tss();
-            u32* stack_top;
 #if ARCH(I386)
-            stack_top = reinterpret_cast<u32*>(tss.esp);
-#else
-            (void)tss;
-            TODO();
-#endif
+            auto& regs = thread.regs();
+            u32* stack_top;
+            stack_top = reinterpret_cast<u32*>(regs.esp);
             if (is_user_range(VirtualAddress(stack_top), sizeof(FlatPtr))) {
                 if (!copy_from_user(&frame_ptr, &((FlatPtr*)stack_top)[0]))
                     frame_ptr = 0;
@@ -505,8 +505,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
                 if (!safe_memcpy(&frame_ptr, &((FlatPtr*)stack_top)[0], sizeof(FlatPtr), fault_at))
                     frame_ptr = 0;
             }
-#if ARCH(I386)
-            eip = tss.eip;
+            eip = regs.eip;
 #else
             TODO();
 #endif
@@ -1067,8 +1066,8 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00cffa00); // code3
     write_raw_gdt_entry(GDT_SELECTOR_DATA3, 0x0000ffff, 0x00cff200); // data3
 #else
-    write_raw_gdt_entry(GDT_SELECTOR_CODE0, 0x0000ffff, 0x00ef9a00); // code0
-    write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00effa00); // code3
+    write_raw_gdt_entry(GDT_SELECTOR_CODE0, 0x0000ffff, 0x00af9a00); // code0
+    write_raw_gdt_entry(GDT_SELECTOR_CODE3, 0x0000ffff, 0x00affa00); // code3
 #endif
 
 #if ARCH(I386)
@@ -1120,9 +1119,7 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
 #if ARCH(X86_64)
     MSR fs_base(MSR_FS_BASE);
     fs_base.set((size_t)this & 0xffffffff, (size_t)this >> 32);
-#endif
-
-#if ARCH(I386)
+#else
     asm volatile(
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
@@ -1130,7 +1127,9 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
         "mov %%ax, %%ss\n" ::"a"(GDT_SELECTOR_DATA0)
         : "memory");
     set_fs(GDT_SELECTOR_PROC);
+#endif
 
+#if ARCH(I386)
     // Make sure CS points to the kernel code descriptor.
     // clang-format off
     asm volatile(
@@ -1139,4 +1138,31 @@ UNMAP_AFTER_INIT void Processor::gdt_init()
     // clang-format on
 #endif
 }
+
+extern "C" void context_first_init([[maybe_unused]] Thread* from_thread, [[maybe_unused]] Thread* to_thread, [[maybe_unused]] TrapFrame* trap)
+{
+    VERIFY(!are_interrupts_enabled());
+    VERIFY(is_kernel_mode());
+
+    dbgln_if(CONTEXT_SWITCH_DEBUG, "switch_context <-- from {} {} to {} {} (context_first_init)", VirtualAddress(from_thread), *from_thread, VirtualAddress(to_thread), *to_thread);
+
+    VERIFY(to_thread == Thread::current());
+
+    Scheduler::enter_current(*from_thread, true);
+
+    // Since we got here and don't have Scheduler::context_switch in the
+    // call stack (because this is the first time we switched into this
+    // context), we need to notify the scheduler so that it can release
+    // the scheduler lock. We don't want to enable interrupts at this point
+    // as we're still in the middle of a context switch. Doing so could
+    // trigger a context switch within a context switch, leading to a crash.
+    FlatPtr flags;
+#if ARCH(I386)
+    flags = trap->regs->eflags;
+#else
+    flags = trap->regs->rflags;
+#endif
+    Scheduler::leave_on_first_switch(flags & ~0x200);
+}
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2021, Andreas Kling <kling@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,25 +8,25 @@
 
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/Generator.h>
-#include <LibJS/Runtime/Function.h>
+#include <LibJS/Runtime/FunctionObject.h>
 
 namespace JS {
 
-class ScriptFunction final : public Function {
-    JS_OBJECT(ScriptFunction, Function);
+class OrdinaryFunctionObject final : public FunctionObject {
+    JS_OBJECT(OrdinaryFunctionObject, FunctionObject);
 
 public:
-    static ScriptFunction* create(GlobalObject&, const FlyString& name, const Statement& body, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, EnvironmentRecord* parent_scope, FunctionKind, bool is_strict, bool is_arrow_function = false);
+    static OrdinaryFunctionObject* create(GlobalObject&, const FlyString& name, const Statement& body, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, EnvironmentRecord* parent_scope, FunctionKind, bool is_strict, bool is_arrow_function = false);
 
-    ScriptFunction(GlobalObject&, const FlyString& name, const Statement& body, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, EnvironmentRecord* parent_scope, Object& prototype, FunctionKind, bool is_strict, bool is_arrow_function = false);
+    OrdinaryFunctionObject(GlobalObject&, const FlyString& name, const Statement& body, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, EnvironmentRecord* parent_scope, Object& prototype, FunctionKind, bool is_strict, bool is_arrow_function = false);
     virtual void initialize(GlobalObject&) override;
-    virtual ~ScriptFunction();
+    virtual ~OrdinaryFunctionObject();
 
     const Statement& body() const { return m_body; }
     const Vector<FunctionNode::Parameter>& parameters() const { return m_parameters; };
 
     virtual Value call() override;
-    virtual Value construct(Function& new_target) override;
+    virtual Value construct(FunctionObject& new_target) override;
 
     virtual const FlyString& name() const override { return m_name; };
     void set_name(const FlyString& name) { m_name = name; };
@@ -41,7 +41,7 @@ protected:
     virtual bool is_strict_mode() const final { return m_is_strict; }
 
 private:
-    virtual FunctionEnvironmentRecord* create_environment_record(Function&) override;
+    virtual FunctionEnvironmentRecord* create_environment_record(FunctionObject&) override;
     virtual void visit_edges(Visitor&) override;
 
     Value execute_function_body();

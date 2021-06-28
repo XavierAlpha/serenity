@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
- * Copyright (c) 2020, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,10 +15,9 @@
 
 namespace JS {
 
+// 22.2.5.1.3 InitializeTypedArrayFromArrayBuffer, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraybuffer
 static void initialize_typed_array_from_array_buffer(GlobalObject& global_object, TypedArrayBase& typed_array, ArrayBuffer& array_buffer, Value byte_offset, Value length)
 {
-    // 22.2.5.1.3 InitializeTypedArrayFromArrayBuffer, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraybuffer
-
     auto& vm = global_object.vm();
     auto element_size = typed_array.element_size();
     auto offset = byte_offset.to_index(global_object);
@@ -80,6 +79,8 @@ static void initialize_typed_array_from_array_buffer(GlobalObject& global_object
     typed_array.set_byte_offset(offset);
     typed_array.set_array_length(new_byte_length.value() / element_size);
 }
+
+// 23.2.5.1.2 InitializeTypedArrayFromTypedArray ( O, srcArray ), https://tc39.es/ecma262/#sec-initializetypedarrayfromtypedarray
 template<typename T>
 static void initialize_typed_array_from_typed_array(GlobalObject& global_object, TypedArray<T>& dest_array, TypedArrayBase& src_array)
 {
@@ -87,30 +88,39 @@ static void initialize_typed_array_from_typed_array(GlobalObject& global_object,
     if (vm.exception())
         return;
 
-    auto* source_array_buffer = src_array.viewed_array_buffer();
-    VERIFY(source_array_buffer);
-    if (source_array_buffer->is_detached()) {
+    auto* src_data = src_array.viewed_array_buffer();
+    VERIFY(src_data);
+    if (src_data->is_detached()) {
         vm.throw_exception<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
         return;
     }
 
-    auto src_array_length = src_array.array_length();
-    auto dest_element_size = dest_array.element_size();
-    Checked byte_length = src_array_length * dest_element_size;
+    auto element_length = src_array.array_length();
+    auto element_size = dest_array.element_size();
+    Checked byte_length = element_size * element_length;
     if (byte_length.has_overflow()) {
         vm.throw_exception<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
         return;
     }
 
-    // FIXME: 17.b If IsDetachedBuffer(array_buffer) is true, throw a TypeError exception.
-    // FIXME: 17.c If src_array.[[ContentType]] != dest_array.[[ContentType]], throw a TypeError exception.
-    auto array_buffer = ArrayBuffer::create(global_object, byte_length.value());
-    dest_array.set_array_length(src_array_length);
-    dest_array.set_viewed_array_buffer(array_buffer);
-    dest_array.set_byte_offset(0);
-    dest_array.set_byte_length(array_buffer->byte_length());
+    auto data = ArrayBuffer::create(global_object, byte_length.value());
 
-    for (u32 i = 0; i < src_array_length; i++) {
+    if (src_data->is_detached()) {
+        vm.throw_exception<TypeError>(global_object, ErrorType::DetachedArrayBuffer);
+        return;
+    }
+
+    if (src_array.content_type() != dest_array.content_type()) {
+        vm.throw_exception<TypeError>(global_object, ErrorType::TypedArrayContentTypeMismatch, dest_array.class_name(), src_array.class_name());
+        return;
+    }
+
+    dest_array.set_viewed_array_buffer(data);
+    dest_array.set_byte_length(byte_length.value());
+    dest_array.set_byte_offset(0);
+    dest_array.set_array_length(element_length);
+
+    for (u32 i = 0; i < element_length; i++) {
         Value v;
 #undef __JS_ENUMERATE
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
@@ -126,11 +136,11 @@ static void initialize_typed_array_from_typed_array(GlobalObject& global_object,
         dest_array.put_by_index(i, v);
     }
 }
+
+// 23.2.5.1.5 InitializeTypedArrayFromArrayLike, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraylike
 template<typename T>
 static void initialize_typed_array_from_array_like(GlobalObject& global_object, TypedArray<T>& typed_array, const Object& array_like)
 {
-    // 23.2.5.1.5 InitializeTypedArrayFromArrayLike, https://tc39.es/ecma262/#sec-initializetypedarrayfromarraylike
-
     auto& vm = global_object.vm();
     auto length = length_of_array_like(global_object, array_like);
     if (vm.exception())
@@ -157,11 +167,11 @@ static void initialize_typed_array_from_array_like(GlobalObject& global_object, 
             return;
     }
 }
+
+// 23.2.5.1.4 InitializeTypedArrayFromList, https://tc39.es/ecma262/#sec-initializetypedarrayfromlist
 template<typename T>
 static void initialize_typed_array_from_list(GlobalObject& global_object, TypedArray<T>& typed_array, const MarkedValueList& list)
 {
-    // 23.2.5.1.4 InitializeTypedArrayFromList, https://tc39.es/ecma262/#sec-initializetypedarrayfromlist
-
     auto element_size = typed_array.element_size();
     if (Checked<size_t>::multiplication_would_overflow(element_size, list.size())) {
         global_object.vm().throw_exception<RangeError>(global_object, ErrorType::InvalidLength, "typed array");
@@ -198,6 +208,10 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
     ClassName::ClassName(u32 length, Object& prototype)                                                                                \
         : TypedArray(length, prototype)                                                                                                \
     {                                                                                                                                  \
+        if constexpr (StringView { #ClassName }.is_one_of("BigInt64Array", "BigUint64Array"))                                          \
+            m_content_type = ContentType::BigInt;                                                                                      \
+        else                                                                                                                           \
+            m_content_type = ContentType::Number;                                                                                      \
     }                                                                                                                                  \
                                                                                                                                        \
     ClassName::~ClassName() { }                                                                                                        \
@@ -246,7 +260,7 @@ void TypedArrayBase::visit_edges(Visitor& visitor)
     }                                                                                                                                  \
                                                                                                                                        \
     /* 23.2.5.1 TypedArray ( ...args ), https://tc39.es/ecma262/#sec-typedarray */                                                     \
-    Value ConstructorName::construct(Function&)                                                                                        \
+    Value ConstructorName::construct(FunctionObject&)                                                                                  \
     {                                                                                                                                  \
         auto& vm = this->vm();                                                                                                         \
         if (vm.argument_count() == 0)                                                                                                  \

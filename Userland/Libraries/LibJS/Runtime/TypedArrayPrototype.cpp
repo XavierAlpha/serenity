@@ -65,7 +65,7 @@ static TypedArrayBase* typed_array_from(VM& vm, GlobalObject& global_object)
     return typed_array;
 }
 
-static Function* callback_from_args(GlobalObject& global_object, const String& name)
+static FunctionObject* callback_from_args(GlobalObject& global_object, const String& name)
 {
     auto& vm = global_object.vm();
     if (vm.argument_count() < 1) {
@@ -80,7 +80,7 @@ static Function* callback_from_args(GlobalObject& global_object, const String& n
     return &callback.as_function();
 }
 
-static void for_each_item(VM& vm, GlobalObject& global_object, const String& name, AK::Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
+static void for_each_item(VM& vm, GlobalObject& global_object, const String& name, Function<IterationDecision(size_t index, Value value, Value callback_result)> callback)
 {
     auto* typed_array = typed_array_from(vm, global_object);
     if (!typed_array)

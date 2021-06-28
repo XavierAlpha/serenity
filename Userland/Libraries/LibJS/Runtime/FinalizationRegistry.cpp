@@ -8,12 +8,12 @@
 
 namespace JS {
 
-FinalizationRegistry* FinalizationRegistry::create(GlobalObject& global_object, Function& cleanup_callback)
+FinalizationRegistry* FinalizationRegistry::create(GlobalObject& global_object, FunctionObject& cleanup_callback)
 {
     return global_object.heap().allocate<FinalizationRegistry>(global_object, cleanup_callback, *global_object.finalization_registry_prototype());
 }
 
-FinalizationRegistry::FinalizationRegistry(Function& cleanup_callback, Object& prototype)
+FinalizationRegistry::FinalizationRegistry(FunctionObject& cleanup_callback, Object& prototype)
     : Object(prototype)
     , WeakContainer(heap())
     , m_cleanup_callback(&cleanup_callback)
@@ -42,24 +42,24 @@ bool FinalizationRegistry::remove_by_token(Object& unregister_token)
     return removed;
 }
 
-void FinalizationRegistry::remove_sweeped_cells(Badge<Heap>, Vector<Cell*>& cells)
+void FinalizationRegistry::remove_swept_cells(Badge<Heap>, Vector<Cell*>& cells)
 {
-    auto any_cells_were_sweeped = false;
+    auto any_cells_were_swept = false;
     for (auto cell : cells) {
         for (auto& record : m_records) {
             if (record.target != cell)
                 continue;
             record.target = nullptr;
-            any_cells_were_sweeped = true;
+            any_cells_were_swept = true;
             break;
         }
     }
-    if (any_cells_were_sweeped)
+    if (any_cells_were_swept)
         vm().enqueue_finalization_registry_cleanup_job(*this);
 }
 
 // 9.13 CleanupFinalizationRegistry ( finalizationRegistry ), https://tc39.es/ecma262/#sec-cleanup-finalization-registry
-void FinalizationRegistry::cleanup(Function* callback)
+void FinalizationRegistry::cleanup(FunctionObject* callback)
 {
     auto& vm = this->vm();
     auto cleanup_callback = callback ?: m_cleanup_callback;

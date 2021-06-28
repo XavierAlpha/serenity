@@ -17,9 +17,15 @@ class TypedArrayBase : public Object {
     JS_OBJECT(TypedArrayBase, Object);
 
 public:
+    enum class ContentType {
+        BigInt,
+        Number,
+    };
+
     u32 array_length() const { return m_array_length; }
     u32 byte_length() const { return m_byte_length; }
     u32 byte_offset() const { return m_byte_offset; }
+    ContentType content_type() const { return m_content_type; }
     ArrayBuffer* viewed_array_buffer() const { return m_viewed_array_buffer; }
 
     void set_array_length(u32 length) { m_array_length = length; }
@@ -39,6 +45,7 @@ protected:
     u32 m_array_length { 0 };
     u32 m_byte_length { 0 };
     u32 m_byte_offset { 0 };
+    ContentType m_content_type { ContentType::Number };
     ArrayBuffer* m_viewed_array_buffer { nullptr };
 
 private:
@@ -56,9 +63,19 @@ public:
     // NOTE: In error cases, the function will return as if it succeeded.
     virtual bool put_by_index(u32 property_index, Value value) override
     {
-        // FIXME: If O.[[ContentType]] is BigInt, let numValue be ? ToBigInt(value).
-        //        Otherwise, let numValue be ? ToNumber(value).
-        //        (set_value currently takes value by itself)
+        auto& vm = this->vm();
+        auto& global_object = this->global_object();
+
+        Value num_value;
+        if (content_type() == TypedArrayBase::ContentType::BigInt) {
+            num_value = value.to_bigint(global_object);
+            if (vm.exception())
+                return {};
+        } else {
+            num_value = value.to_number(global_object);
+            if (vm.exception())
+                return {};
+        }
 
         if (!is_valid_integer_index(property_index))
             return true;
@@ -75,7 +92,7 @@ public:
             return true;
         }
 
-        viewed_array_buffer()->template set_value<T>(indexed_position.value(), value, true, ArrayBuffer::Order::Unordered);
+        viewed_array_buffer()->template set_value<T>(indexed_position.value(), num_value, true, ArrayBuffer::Order::Unordered);
 
         return true;
     }
@@ -179,7 +196,7 @@ private:
         virtual ~ConstructorName() override;                                                \
                                                                                             \
         virtual Value call() override;                                                      \
-        virtual Value construct(Function& new_target) override;                             \
+        virtual Value construct(FunctionObject& new_target) override;                       \
                                                                                             \
     private:                                                                                \
         virtual bool has_constructor() const override { return true; }                      \

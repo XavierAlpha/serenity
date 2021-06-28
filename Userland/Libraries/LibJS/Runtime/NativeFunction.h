@@ -7,22 +7,22 @@
 #pragma once
 
 #include <AK/Function.h>
-#include <LibJS/Runtime/Function.h>
+#include <LibJS/Runtime/FunctionObject.h>
 
 namespace JS {
 
-class NativeFunction : public Function {
-    JS_OBJECT(NativeFunction, Function);
+class NativeFunction : public FunctionObject {
+    JS_OBJECT(NativeFunction, FunctionObject);
 
 public:
-    static NativeFunction* create(GlobalObject&, const FlyString& name, AK::Function<Value(VM&, GlobalObject&)>);
+    static NativeFunction* create(GlobalObject&, const FlyString& name, Function<Value(VM&, GlobalObject&)>);
 
-    explicit NativeFunction(PropertyName const& name, AK::Function<Value(VM&, GlobalObject&)>, Object& prototype);
+    explicit NativeFunction(PropertyName const& name, Function<Value(VM&, GlobalObject&)>, Object& prototype);
     virtual void initialize(GlobalObject&) override { }
     virtual ~NativeFunction() override;
 
     virtual Value call() override;
-    virtual Value construct(Function& new_target) override;
+    virtual Value construct(FunctionObject& new_target) override;
 
     virtual const FlyString& name() const override { return m_name; };
     virtual bool has_constructor() const { return false; }
@@ -34,11 +34,11 @@ protected:
     explicit NativeFunction(Object& prototype);
 
 private:
-    virtual FunctionEnvironmentRecord* create_environment_record(Function&) override final;
+    virtual FunctionEnvironmentRecord* create_environment_record(FunctionObject&) override final;
     virtual bool is_native_function() const final { return true; }
 
     FlyString m_name;
-    AK::Function<Value(VM&, GlobalObject&)> m_native_function;
+    Function<Value(VM&, GlobalObject&)> m_native_function;
 };
 
 template<>

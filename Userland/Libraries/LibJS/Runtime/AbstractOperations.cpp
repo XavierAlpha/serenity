@@ -11,11 +11,13 @@
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/ArrayPrototype.h>
 #include <LibJS/Runtime/BoundFunction.h>
 #include <LibJS/Runtime/DeclarativeEnvironmentRecord.h>
 #include <LibJS/Runtime/ErrorTypes.h>
-#include <LibJS/Runtime/Function.h>
 #include <LibJS/Runtime/FunctionEnvironmentRecord.h>
+#include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/GlobalEnvironmentRecord.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Object.h>
@@ -50,7 +52,7 @@ size_t length_of_array_like(GlobalObject& global_object, Object const& object)
 }
 
 // 7.3.19 CreateListFromArrayLike ( obj [ , elementTypes ] ), https://tc39.es/ecma262/#sec-createlistfromarraylike
-MarkedValueList create_list_from_array_like(GlobalObject& global_object, Value value, AK::Function<Result<void, ErrorType>(Value)> check_value)
+MarkedValueList create_list_from_array_like(GlobalObject& global_object, Value value, Function<Result<void, ErrorType>(Value)> check_value)
 {
     auto& vm = global_object.vm();
     auto& heap = global_object.heap();
@@ -81,7 +83,7 @@ MarkedValueList create_list_from_array_like(GlobalObject& global_object, Value v
 }
 
 // 7.3.22 SpeciesConstructor ( O, defaultConstructor ), https://tc39.es/ecma262/#sec-speciesconstructor
-Function* species_constructor(GlobalObject& global_object, Object const& object, Function& default_constructor)
+FunctionObject* species_constructor(GlobalObject& global_object, Object const& object, FunctionObject& default_constructor)
 {
     auto& vm = global_object.vm();
     auto constructor = object.get(vm.names.constructor).value_or(js_undefined());
@@ -103,7 +105,7 @@ Function* species_constructor(GlobalObject& global_object, Object const& object,
 }
 
 // 7.3.24 GetFunctionRealm ( obj ), https://tc39.es/ecma262/#sec-getfunctionrealm
-GlobalObject* get_function_realm(GlobalObject& global_object, Function const& function)
+GlobalObject* get_function_realm(GlobalObject& global_object, FunctionObject const& function)
 {
     auto& vm = global_object.vm();
 
@@ -123,14 +125,14 @@ GlobalObject* get_function_realm(GlobalObject& global_object, Function const& fu
         }
         auto& proxy_target = proxy.target();
         VERIFY(proxy_target.is_function());
-        return get_function_realm(global_object, static_cast<Function const&>(proxy_target));
+        return get_function_realm(global_object, static_cast<FunctionObject const&>(proxy_target));
     }
     // 5. Return the current Realm Record.
     return &global_object;
 }
 
 // 10.1.14 GetPrototypeFromConstructor ( constructor, intrinsicDefaultProto )
-Object* get_prototype_from_constructor(GlobalObject& global_object, Function const& constructor, Object* (GlobalObject::*intrinsic_default_prototype)())
+Object* get_prototype_from_constructor(GlobalObject& global_object, FunctionObject const& constructor, Object* (GlobalObject::*intrinsic_default_prototype)())
 {
     auto& vm = global_object.vm();
     auto prototype = constructor.get(vm.names.prototype);
@@ -202,6 +204,38 @@ Value perform_eval(Value x, GlobalObject& caller_realm, CallerMode strict_caller
 
     TemporaryChange scope_change(vm.running_execution_context().lexical_environment, static_cast<EnvironmentRecord*>(&caller_realm.environment_record()));
     return interpreter.execute_statement(caller_realm, program).value_or(js_undefined());
+}
+
+// 10.4.4.6 CreateUnmappedArgumentsObject ( argumentsList ), https://tc39.es/ecma262/#sec-createunmappedargumentsobject
+Object* create_unmapped_arguments_object(GlobalObject& global_object, Vector<Value> const& arguments)
+{
+    auto& vm = global_object.vm();
+    // FIXME: This should use OrdinaryObjectCreate
+    auto* object = Object::create(global_object, global_object.object_prototype());
+    if (vm.exception())
+        return nullptr;
+
+    // 4. Perform DefinePropertyOrThrow(obj, "length", PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
+    auto length = arguments.size();
+    object->define_property(vm.names.length, Value(length), Attribute::Writable | Attribute::Configurable);
+    if (vm.exception())
+        return nullptr;
+
+    object->define_property(*vm.well_known_symbol_iterator(), global_object.array_prototype()->get(vm.names.values), Attribute::Writable | Attribute::Configurable);
+
+    for (auto& argument : arguments)
+        object->indexed_properties().append(argument);
+
+    // FIXME: 8. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%, [[Enumerable]]: false, [[Configurable]]: false }).
+    PropertyAttributes attributes;
+    attributes.set_has_configurable();
+    attributes.set_has_enumerable();
+
+    object->define_property(vm.names.callee, js_undefined(), attributes);
+    if (vm.exception())
+        return nullptr;
+
+    return object;
 }
 
 }

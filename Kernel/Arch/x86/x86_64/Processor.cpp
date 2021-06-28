@@ -15,7 +15,6 @@
 
 namespace Kernel {
 
-#define ENTER_THREAD_CONTEXT_ARGS_SIZE (2 * 4) //  to_thread, from_thread
 extern "C" void thread_context_first_enter(void);
 extern "C" void do_assume_context(Thread* thread, u32 flags);
 extern "C" void exit_kernel_thread(void);
@@ -28,11 +27,11 @@ asm(
 // switch_context will have pushed from_thread and to_thread to our new
 // stack prior to thread_context_first_enter() being called, and the
 // pointer to TrapFrame was the top of the stack before that
-"    movl 8(%esp), %ebx \n" // save pointer to TrapFrame
+"    popq %rdi \n" // from_thread (argument 0)
+"    popq %rsi \n" // to_thread (argument 1)
+"    popq %rdx \n" // pointer to TrapFrame (argument 2)
 "    cld \n"
 "    call context_first_init \n"
-"    addl $" __STRINGIFY(ENTER_THREAD_CONTEXT_ARGS_SIZE) ", %esp \n"
-"    movl %ebx, 0(%esp) \n" // push pointer to TrapFrame
 "    jmp common_trap_exit \n"
 );
 // clang-format on
@@ -67,6 +66,7 @@ String Processor::platform_string() const
     return "x86_64";
 }
 
+// FIXME: For the most part this is a copy of the i386-specific function, get rid of the code duplication
 u32 Processor::init_context(Thread& thread, bool leave_crit)
 {
     VERIFY(is_kernel_mode());
@@ -78,45 +78,56 @@ u32 Processor::init_context(Thread& thread, bool leave_crit)
         VERIFY(in_critical() == 1);
     }
 
-    u32 kernel_stack_top = thread.kernel_stack_top();
+    u64 kernel_stack_top = thread.kernel_stack_top();
 
     // Add a random offset between 0-256 (16-byte aligned)
     kernel_stack_top -= round_up_to_power_of_two(get_fast_random<u8>(), 16);
 
-    u32 stack_top = kernel_stack_top;
+    u64 stack_top = kernel_stack_top;
 
     // TODO: handle NT?
     VERIFY((cpu_flags() & 0x24000) == 0); // Assume !(NT | VM)
 
-#if 0
-    auto& tss = thread.tss();
-    bool return_to_user = (tss.cs & 3) != 0;
+    auto& regs = thread.regs();
+    bool return_to_user = (regs.cs & 3) != 0;
 
     // make room for an interrupt frame
     if (!return_to_user) {
-        // userspace_esp and userspace_ss are not popped off by iret
+        // userspace_rsp is not popped off by iretq
         // unless we're switching back to user mode
-        stack_top -= sizeof(RegisterState) - 2 * sizeof(u32);
+        stack_top -= sizeof(RegisterState) - 2 * sizeof(FlatPtr);
 
         // For kernel threads we'll push the thread function argument
-        // which should be in tss.esp and exit_kernel_thread as return
+        // which should be in regs.rsp and exit_kernel_thread as return
         // address.
-        stack_top -= 2 * sizeof(u32);
-        *reinterpret_cast<u32*>(kernel_stack_top - 2 * sizeof(u32)) = tss.esp;
-        *reinterpret_cast<u32*>(kernel_stack_top - 3 * sizeof(u32)) = FlatPtr(&exit_kernel_thread);
+        stack_top -= 2 * sizeof(u64);
+        *reinterpret_cast<u64*>(kernel_stack_top - 2 * sizeof(u64)) = regs.rsp;
+        *reinterpret_cast<u64*>(kernel_stack_top - 3 * sizeof(u64)) = FlatPtr(&exit_kernel_thread);
     } else {
         stack_top -= sizeof(RegisterState);
     }
 
-    // we want to end up 16-byte aligned, %esp + 4 should be aligned
-    stack_top -= sizeof(u32);
-    *reinterpret_cast<u32*>(kernel_stack_top - sizeof(u32)) = 0;
+    // we want to end up 16-byte aligned, %rsp + 8 should be aligned
+    stack_top -= sizeof(u64);
+    *reinterpret_cast<u64*>(kernel_stack_top - sizeof(u64)) = 0;
 
     // set up the stack so that after returning from thread_context_first_enter()
     // we will end up either in kernel mode or user mode, depending on how the thread is set up
     // However, the first step is to always start in kernel mode with thread_context_first_enter
     RegisterState& iretframe = *reinterpret_cast<RegisterState*>(stack_top);
-    // FIXME: copy state to be recovered through TSS
+    iretframe.rdi = regs.rdi;
+    iretframe.rsi = regs.rsi;
+    iretframe.rbp = regs.rbp;
+    iretframe.rsp = 0;
+    iretframe.rbx = regs.rbx;
+    iretframe.rdx = regs.rdx;
+    iretframe.rcx = regs.rcx;
+    iretframe.rax = regs.rax;
+    iretframe.rflags = regs.rflags;
+    iretframe.rip = regs.rip;
+    iretframe.cs = regs.cs;
+    if (return_to_user)
+        iretframe.userspace_rsp = regs.rsp;
 
     // make space for a trap frame
     stack_top -= sizeof(TrapFrame);
@@ -125,25 +136,24 @@ u32 Processor::init_context(Thread& thread, bool leave_crit)
     trap.prev_irq_level = 0;
     trap.next_trap = nullptr;
 
-    stack_top -= sizeof(u32); // pointer to TrapFrame
-    *reinterpret_cast<u32*>(stack_top) = stack_top + 4;
+    stack_top -= sizeof(u64); // pointer to TrapFrame
+    *reinterpret_cast<u64*>(stack_top) = stack_top + 8;
 
     if constexpr (CONTEXT_SWITCH_DEBUG) {
         if (return_to_user) {
-            dbgln("init_context {} ({}) set up to execute at eip={}:{}, esp={}, stack_top={}, user_top={}:{}",
+            dbgln("init_context {} ({}) set up to execute at rip={}:{}, rsp={}, stack_top={}, user_top={}",
                 thread,
                 VirtualAddress(&thread),
-                iretframe.cs, tss.eip,
-                VirtualAddress(tss.esp),
+                iretframe.cs, regs.rip,
+                VirtualAddress(regs.rsp),
                 VirtualAddress(stack_top),
-                iretframe.userspace_ss,
-                iretframe.userspace_esp);
+                iretframe.userspace_rsp);
         } else {
-            dbgln("init_context {} ({}) set up to execute at eip={}:{}, esp={}, stack_top={}",
+            dbgln("init_context {} ({}) set up to execute at rip={}:{}, rsp={}, stack_top={}",
                 thread,
                 VirtualAddress(&thread),
-                iretframe.cs, tss.eip,
-                VirtualAddress(tss.esp),
+                iretframe.cs, regs.rip,
+                VirtualAddress(regs.rsp),
                 VirtualAddress(stack_top));
         }
     }
@@ -152,18 +162,9 @@ u32 Processor::init_context(Thread& thread, bool leave_crit)
     // in kernel mode, so set up these values so that we end up popping iretframe
     // off the stack right after the context switch completed, at which point
     // control is transferred to what iretframe is pointing to.
-    tss.eip = FlatPtr(&thread_context_first_enter);
-    tss.esp0 = kernel_stack_top;
-    tss.esp = stack_top;
-    tss.cs = GDT_SELECTOR_CODE0;
-    tss.ds = GDT_SELECTOR_DATA0;
-    tss.es = GDT_SELECTOR_DATA0;
-    tss.gs = GDT_SELECTOR_DATA0;
-    tss.ss = GDT_SELECTOR_DATA0;
-    tss.fs = GDT_SELECTOR_PROC;
-#else
-    TODO();
-#endif
+    regs.rip = FlatPtr(&thread_context_first_enter);
+    regs.rsp0 = kernel_stack_top;
+    regs.rsp = stack_top;
     return stack_top;
 }
 
@@ -203,21 +204,34 @@ UNMAP_AFTER_INIT void Processor::initialize_context_switching(Thread& initial_th
 {
     VERIFY(initial_thread.process().is_kernel_process());
 
-    auto& tss = initial_thread.tss();
-    m_tss = tss;
-#if 0
-    m_tss.esp0 = tss.esp0;
-    m_tss.ss0 = GDT_SELECTOR_DATA0;
-    // user mode needs to be able to switch to kernel mode:
-    m_tss.cs = m_tss.ds = m_tss.es = m_tss.gs = m_tss.ss = GDT_SELECTOR_CODE0 | 3;
-    m_tss.fs = GDT_SELECTOR_PROC | 3;
-#else
-    TODO();
-#endif
+    auto& regs = initial_thread.regs();
+    m_tss.iomapbase = sizeof(m_tss);
+    m_tss.rsp0l = regs.rsp0 & 0xffffffff;
+    m_tss.rsp0h = regs.rsp0 >> 32;
 
     m_scheduler_initialized = true;
 
-    // FIXME: Context switching (see i386 impl)
+    // clang-format off
+    asm volatile(
+        "movq %[new_rsp], %%rsp \n" // switch to new stack
+        "pushq %[from_to_thread] \n" // to_thread
+        "pushq %[from_to_thread] \n" // from_thread
+        "pushq %[new_rip] \n" // save the entry rip to the stack
+        "cld \n"
+        "pushq %[cpu] \n" // push argument for init_finished before register is clobbered
+        "call pre_init_finished \n"
+        "pop %%rdi \n" // move argument for init_finished into place
+        "call init_finished \n"
+        "call post_init_finished \n"
+        "movq 24(%%rsp), %%rdi \n" // move pointer to TrapFrame into place
+        "call enter_trap_no_irq \n"
+        "retq \n"
+        :: [new_rsp] "g" (regs.rsp),
+        [new_rip] "a" (regs.rip),
+        [from_to_thread] "b" (&initial_thread),
+        [cpu] "c" ((u64)id())
+    );
+    // clang-format on
 
     VERIFY_NOT_REACHED();
 }
