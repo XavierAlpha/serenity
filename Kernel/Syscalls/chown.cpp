@@ -9,16 +9,16 @@
 
 namespace Kernel {
 
-KResultOr<int> Process::sys$fchown(int fd, uid_t uid, gid_t gid)
+KResultOr<FlatPtr> Process::sys$fchown(int fd, uid_t uid, gid_t gid)
 {
     REQUIRE_PROMISE(chown);
-    auto description = file_description(fd);
+    auto description = fds().file_description(fd);
     if (!description)
         return EBADF;
     return description->chown(uid, gid);
 }
 
-KResultOr<int> Process::sys$chown(Userspace<const Syscall::SC_chown_params*> user_params)
+KResultOr<FlatPtr> Process::sys$chown(Userspace<const Syscall::SC_chown_params*> user_params)
 {
     REQUIRE_PROMISE(chown);
     Syscall::SC_chown_params params;

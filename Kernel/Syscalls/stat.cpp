@@ -12,10 +12,10 @@
 
 namespace Kernel {
 
-KResultOr<int> Process::sys$fstat(int fd, Userspace<stat*> user_statbuf)
+KResultOr<FlatPtr> Process::sys$fstat(int fd, Userspace<stat*> user_statbuf)
 {
     REQUIRE_PROMISE(stdio);
-    auto description = file_description(fd);
+    auto description = fds().file_description(fd);
     if (!description)
         return EBADF;
     stat buffer = {};
@@ -25,7 +25,7 @@ KResultOr<int> Process::sys$fstat(int fd, Userspace<stat*> user_statbuf)
     return rc;
 }
 
-KResultOr<int> Process::sys$stat(Userspace<const Syscall::SC_stat_params*> user_params)
+KResultOr<FlatPtr> Process::sys$stat(Userspace<const Syscall::SC_stat_params*> user_params)
 {
     REQUIRE_PROMISE(rpath);
     Syscall::SC_stat_params params;
@@ -38,7 +38,7 @@ KResultOr<int> Process::sys$stat(Userspace<const Syscall::SC_stat_params*> user_
     if (params.dirfd == AT_FDCWD) {
         base = current_directory();
     } else {
-        auto base_description = file_description(params.dirfd);
+        auto base_description = fds().file_description(params.dirfd);
         if (!base_description)
             return EBADF;
         if (!base_description->is_directory())

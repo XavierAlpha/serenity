@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021, Max Wipfli <max.wipfli@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -13,29 +14,29 @@ namespace AK {
 
 class LexicalPath {
 public:
-    LexicalPath() = default;
     explicit LexicalPath(String);
 
-    bool is_valid() const { return m_is_valid; }
-    bool is_absolute() const { return m_is_absolute; }
-    const String& string() const { return m_string; }
+    bool is_absolute() const { return !m_string.is_empty() && m_string[0] == '/'; }
+    String const& string() const { return m_string; }
 
-    const String& dirname() const { return m_dirname; }
-    const String& basename() const { return m_basename; }
-    const String& title() const { return m_title; }
-    const String& extension() const { return m_extension; }
+    StringView const& dirname() const { return m_dirname; }
+    StringView const& basename() const { return m_basename; }
+    StringView const& title() const { return m_title; }
+    StringView const& extension() const { return m_extension; }
 
-    const Vector<String>& parts() const { return m_parts; }
+    Vector<StringView> const& parts_view() const { return m_parts; }
+    [[nodiscard]] Vector<String> parts() const;
 
-    bool has_extension(const StringView&) const;
+    bool has_extension(StringView const&) const;
 
-    void append(String const& component);
+    [[nodiscard]] LexicalPath append(StringView const&) const;
+    [[nodiscard]] LexicalPath parent() const;
 
-    static String canonicalized_path(String);
-    static String relative_path(String absolute_path, String const& prefix);
+    [[nodiscard]] static String canonicalized_path(String);
+    [[nodiscard]] static String relative_path(StringView const& absolute_path, StringView const& prefix);
 
     template<typename... S>
-    static LexicalPath join(String const& first, S&&... rest)
+    [[nodiscard]] static LexicalPath join(String const& first, S&&... rest)
     {
         StringBuilder builder;
         builder.append(first);
@@ -44,22 +45,42 @@ public:
         return LexicalPath { builder.to_string() };
     }
 
-private:
-    void canonicalize();
+    [[nodiscard]] static String dirname(String path)
+    {
+        auto lexical_path = LexicalPath(move(path));
+        return lexical_path.dirname();
+    }
 
-    Vector<String> m_parts;
+    [[nodiscard]] static String basename(String path)
+    {
+        auto lexical_path = LexicalPath(move(path));
+        return lexical_path.basename();
+    }
+
+    [[nodiscard]] static String title(String path)
+    {
+        auto lexical_path = LexicalPath(move(path));
+        return lexical_path.title();
+    }
+
+    [[nodiscard]] static String extension(String path)
+    {
+        auto lexical_path = LexicalPath(move(path));
+        return lexical_path.extension();
+    }
+
+private:
+    Vector<StringView> m_parts;
     String m_string;
-    String m_dirname;
-    String m_basename;
-    String m_title;
-    String m_extension;
-    bool m_is_valid { false };
-    bool m_is_absolute { false };
+    StringView m_dirname;
+    StringView m_basename;
+    StringView m_title;
+    StringView m_extension;
 };
 
 template<>
 struct Formatter<LexicalPath> : Formatter<StringView> {
-    void format(FormatBuilder& builder, const LexicalPath& value)
+    void format(FormatBuilder& builder, LexicalPath const& value)
     {
         Formatter<StringView>::format(builder, value.string());
     }

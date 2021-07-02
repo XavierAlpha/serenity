@@ -17,7 +17,7 @@ class NativeFunction : public FunctionObject {
 public:
     static NativeFunction* create(GlobalObject&, const FlyString& name, Function<Value(VM&, GlobalObject&)>);
 
-    explicit NativeFunction(PropertyName const& name, Function<Value(VM&, GlobalObject&)>, Object& prototype);
+    explicit NativeFunction(FlyString name, Function<Value(VM&, GlobalObject&)>, Object& prototype);
     virtual void initialize(GlobalObject&) override { }
     virtual ~NativeFunction() override;
 
@@ -29,12 +29,14 @@ public:
 
     virtual bool is_strict_mode() const override;
 
+    GlobalObject* realm() const override { return &global_object(); }
+
 protected:
-    NativeFunction(PropertyName const& name, Object& prototype);
+    NativeFunction(FlyString name, Object& prototype);
     explicit NativeFunction(Object& prototype);
 
 private:
-    virtual FunctionEnvironmentRecord* create_environment_record(FunctionObject&) override final;
+    virtual FunctionEnvironment* create_environment(FunctionObject&) override final;
     virtual bool is_native_function() const final { return true; }
 
     FlyString m_name;

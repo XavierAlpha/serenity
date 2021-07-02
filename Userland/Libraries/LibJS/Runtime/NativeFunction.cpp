@@ -20,16 +20,16 @@ NativeFunction::NativeFunction(Object& prototype)
 {
 }
 
-NativeFunction::NativeFunction(PropertyName const& name, Function<Value(VM&, GlobalObject&)> native_function, Object& prototype)
+NativeFunction::NativeFunction(FlyString name, Function<Value(VM&, GlobalObject&)> native_function, Object& prototype)
     : FunctionObject(prototype)
-    , m_name(name.as_string())
+    , m_name(move(name))
     , m_native_function(move(native_function))
 {
 }
 
-NativeFunction::NativeFunction(PropertyName const& name, Object& prototype)
+NativeFunction::NativeFunction(FlyString name, Object& prototype)
     : FunctionObject(prototype)
-    , m_name(name.as_string())
+    , m_name(move(name))
 {
 }
 
@@ -47,7 +47,7 @@ Value NativeFunction::construct(FunctionObject&)
     return {};
 }
 
-FunctionEnvironmentRecord* NativeFunction::create_environment_record(FunctionObject&)
+FunctionEnvironment* NativeFunction::create_environment(FunctionObject&)
 {
     return nullptr;
 }

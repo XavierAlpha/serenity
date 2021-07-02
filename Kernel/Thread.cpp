@@ -16,6 +16,7 @@
 #include <Kernel/Panic.h>
 #include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/Process.h>
+#include <Kernel/ProcessExposed.h>
 #include <Kernel/Scheduler.h>
 #include <Kernel/Sections.h>
 #include <Kernel/Thread.h>
@@ -38,6 +39,12 @@ UNMAP_AFTER_INIT void Thread::initialize()
 
 KResultOr<NonnullRefPtr<Thread>> Thread::try_create(NonnullRefPtr<Process> process)
 {
+    // FIXME: Once we have aligned + nothrow operator new, we can avoid the manual kfree.
+    FPUState* fpu_state = (FPUState*)kmalloc_aligned<16>(sizeof(FPUState));
+    if (!fpu_state)
+        return ENOMEM;
+    ArmedScopeGuard fpu_guard([fpu_state]() { kfree_aligned(fpu_state); });
+
     auto kernel_stack_region = MM.allocate_kernel_region(default_kernel_stack_size, {}, Region::Access::Read | Region::Access::Write, AllocationStrategy::AllocateNow);
     if (!kernel_stack_region)
         return ENOMEM;
@@ -47,18 +54,21 @@ KResultOr<NonnullRefPtr<Thread>> Thread::try_create(NonnullRefPtr<Process> proce
     if (!block_timer)
         return ENOMEM;
 
-    auto thread = adopt_ref_if_nonnull(new (nothrow) Thread(move(process), kernel_stack_region.release_nonnull(), block_timer.release_nonnull()));
+    auto thread = adopt_ref_if_nonnull(new (nothrow) Thread(move(process), kernel_stack_region.release_nonnull(), block_timer.release_nonnull(), fpu_state));
     if (!thread)
         return ENOMEM;
+    fpu_guard.disarm();
 
     return thread.release_nonnull();
 }
 
-Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Region> kernel_stack_region, NonnullRefPtr<Timer> block_timer)
+Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Region> kernel_stack_region, NonnullRefPtr<Timer> block_timer, FPUState* fpu_state)
     : m_process(move(process))
     , m_kernel_stack_region(move(kernel_stack_region))
+    , m_fpu_state(fpu_state)
     , m_name(m_process->name())
     , m_block_timer(block_timer)
+    , m_global_procfs_inode_index(ProcFSComponentsRegistrar::the().allocate_inode_index())
 {
     bool is_first_thread = m_process->add_thread(*this);
     if (is_first_thread) {
@@ -82,7 +92,6 @@ Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Region> kernel_stac
     if constexpr (THREAD_DEBUG)
         dbgln("Created new thread {}({}:{})", m_process->name(), m_process->pid().value(), m_tid.value());
 
-    m_fpu_state = (FPUState*)kmalloc_aligned<16>(sizeof(FPUState));
     reset_fpu_state();
 
 #if ARCH(I386)
@@ -450,8 +459,12 @@ void Thread::finalize_dying_threads()
         });
     }
     for (auto* thread : dying_threads) {
+        RefPtr<Process> process = thread->process();
+        dbgln_if(PROCESS_DEBUG, "Before finalization, {} has {} refs and its process has {}",
+            *thread, thread->ref_count(), thread->process().ref_count());
         thread->finalize();
-
+        dbgln_if(PROCESS_DEBUG, "After finalization, {} has {} refs and its process has {}",
+            *thread, thread->ref_count(), thread->process().ref_count());
         // This thread will never execute again, drop the running reference
         // NOTE: This may not necessarily drop the last reference if anything
         //       else is still holding onto this thread!
@@ -822,7 +835,11 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         dbgln_if(SIGNAL_DEBUG, "Setting up user stack to return to EIP {:p}, ESP {:p}", ret_eip, old_esp);
 #elif ARCH(X86_64)
         FlatPtr* stack = &state.userspace_rsp;
-        TODO();
+        FlatPtr old_rsp = *stack;
+        FlatPtr ret_rip = state.rip;
+        FlatPtr ret_rflags = state.rflags;
+
+        dbgln_if(SIGNAL_DEBUG, "Setting up user stack to return to RIP {:p}, RSP {:p}", ret_rip, old_rsp);
 #endif
 
 #if ARCH(I386)
@@ -843,10 +860,32 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         push_value_on_user_stack(stack, state.ebp);
         push_value_on_user_stack(stack, state.esi);
         push_value_on_user_stack(stack, state.edi);
-
 #else
-        // FIXME
-        PANIC("Thread:dispatch_signal() not implemented");
+        // Align the stack to 16 bytes.
+        // Note that we push 176 bytes (8 * 22) on to the stack,
+        // so we need to account for this here.
+        FlatPtr stack_alignment = (*stack - 112) % 16;
+        *stack -= stack_alignment;
+
+        push_value_on_user_stack(stack, ret_rflags);
+
+        push_value_on_user_stack(stack, ret_rip);
+        push_value_on_user_stack(stack, state.r15);
+        push_value_on_user_stack(stack, state.r14);
+        push_value_on_user_stack(stack, state.r13);
+        push_value_on_user_stack(stack, state.r12);
+        push_value_on_user_stack(stack, state.r11);
+        push_value_on_user_stack(stack, state.r10);
+        push_value_on_user_stack(stack, state.r9);
+        push_value_on_user_stack(stack, state.r8);
+        push_value_on_user_stack(stack, state.rax);
+        push_value_on_user_stack(stack, state.rcx);
+        push_value_on_user_stack(stack, state.rdx);
+        push_value_on_user_stack(stack, state.rbx);
+        push_value_on_user_stack(stack, old_rsp);
+        push_value_on_user_stack(stack, state.rbp);
+        push_value_on_user_stack(stack, state.rsi);
+        push_value_on_user_stack(stack, state.rdi);
 #endif
 
         // PUSH old_signal_mask
@@ -887,7 +926,7 @@ RegisterState& Thread::get_register_dump_from_stack()
 
     // We should *always* have a trap. If we don't we're probably a kernel
     // thread that hasn't been pre-empted. If we want to support this, we
-    // need to capture the registers probably into m_tss and return it
+    // need to capture the registers probably into m_regs and return it
     VERIFY(trap);
 
     while (trap) {

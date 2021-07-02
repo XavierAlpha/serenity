@@ -528,11 +528,16 @@ void Compositor::compose()
     m_invalidated_window = false;
     m_invalidated_cursor = false;
 
-    Screen::for_each([&](auto& screen) {
-        auto& screen_data = m_screen_data[screen.index()];
-        update_animations(screen, screen_data.m_flush_special_rects);
-        return IterationDecision::Continue;
-    });
+    if (!m_animations.is_empty()) {
+        Screen::for_each([&](auto& screen) {
+            auto& screen_data = m_screen_data[screen.index()];
+            update_animations(screen, screen_data.m_flush_special_rects);
+            return IterationDecision::Continue;
+        });
+        // As long as animations are running make sure we keep rendering frames
+        m_invalidated_any = true;
+        start_compose_async_timer();
+    }
 
     if (need_to_draw_cursor) {
         auto& screen_data = m_screen_data[cursor_screen.index()];
@@ -568,9 +573,9 @@ void Compositor::flush(Screen& screen)
         // Almost everything in Compositor is in logical coordinates, with the painters having
         // a scale applied. But this routine accesses the backbuffer pixels directly, so it
         // must work in physical coordinates.
-        rect = rect * screen.scale_factor();
-        Gfx::RGBA32* front_ptr = screen_data.m_front_bitmap->scanline(rect.y()) + rect.x();
-        Gfx::RGBA32* back_ptr = screen_data.m_back_bitmap->scanline(rect.y()) + rect.x();
+        auto scaled_rect = rect * screen.scale_factor();
+        Gfx::RGBA32* front_ptr = screen_data.m_front_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
+        Gfx::RGBA32* back_ptr = screen_data.m_back_bitmap->scanline(scaled_rect.y()) + scaled_rect.x();
         size_t pitch = screen_data.m_back_bitmap->pitch();
 
         // NOTE: The meaning of a flush depends on whether we can flip buffers or not.
@@ -593,8 +598,8 @@ void Compositor::flush(Screen& screen)
             from_ptr = back_ptr;
         }
 
-        for (int y = 0; y < rect.height(); ++y) {
-            fast_u32_copy(to_ptr, from_ptr, rect.width());
+        for (int y = 0; y < scaled_rect.height(); ++y) {
+            fast_u32_copy(to_ptr, from_ptr, scaled_rect.width());
             from_ptr = (const Gfx::RGBA32*)((const u8*)from_ptr + pitch);
             to_ptr = (Gfx::RGBA32*)((u8*)to_ptr + pitch);
         }
@@ -684,7 +689,7 @@ bool Compositor::set_wallpaper_mode(const String& mode)
 bool Compositor::set_wallpaper(const String& path, Function<void(bool)>&& callback)
 {
     Threading::BackgroundAction<RefPtr<Gfx::Bitmap>>::create(
-        [path] {
+        [path](auto&) {
             return Gfx::Bitmap::load_from_file(path);
         },
 
@@ -1205,8 +1210,17 @@ void Compositor::recompute_occlusions()
 
 void Compositor::register_animation(Badge<Animation>, Animation& animation)
 {
+    bool was_empty = m_animations.is_empty();
     auto result = m_animations.set(&animation);
     VERIFY(result == AK::HashSetResult::InsertedNewEntry);
+    if (was_empty)
+        start_compose_async_timer();
+}
+
+void Compositor::animation_started(Badge<Animation>)
+{
+    m_invalidated_any = true;
+    start_compose_async_timer();
 }
 
 void Compositor::unregister_animation(Badge<Animation>, Animation& animation)

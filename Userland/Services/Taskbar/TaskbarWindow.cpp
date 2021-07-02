@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2021, Spencer Dixon <spencercdixon@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -10,7 +11,6 @@
 #include <AK/Debug.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/StandardPaths.h>
-#include <LibDesktop/AppFile.h>
 #include <LibGUI/BoxLayout.h>
 #include <LibGUI/Button.h>
 #include <LibGUI/Desktop.h>
@@ -87,6 +87,9 @@ TaskbarWindow::TaskbarWindow(NonnullRefPtr<GUI::Menu> start_menu)
     m_applet_area_container->set_frame_shadow(Gfx::FrameShadow::Sunken);
 
     main_widget.add<Taskbar::ClockWidget>();
+
+    auto af_path = String::formatted("{}/{}", Desktop::AppFile::APP_FILES_DIRECTORY, "Assistant.af");
+    m_assistant_app_file = Desktop::AppFile::open(af_path);
 }
 
 TaskbarWindow::~TaskbarWindow()
@@ -326,6 +329,11 @@ void TaskbarWindow::wm_event(GUI::WMEvent& event)
         } else {
             m_start_menu->popup(m_start_button->screen_relative_rect().top_left());
         }
+        break;
+    }
+    case GUI::Event::WM_SuperSpaceKeyPressed: {
+        if (!m_assistant_app_file->spawn())
+            warnln("failed to spawn 'Assistant' when requested via Super+Space");
         break;
     }
     default:

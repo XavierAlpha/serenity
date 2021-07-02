@@ -64,6 +64,7 @@ set(SOURCES
     DOM/Timer.cpp
     DOM/Window.cpp
     DOMTreeModel.cpp
+    DOMTreeJSONModel.cpp
     Dump.cpp
     FontCache.cpp
     HTML/AttributeNames.cpp
@@ -221,10 +222,14 @@ set(SOURCES
     UIEvents/EventNames.cpp
     UIEvents/MouseEvent.cpp
     URLEncoder.cpp
+    WebAssembly/WebAssemblyInstanceConstructor.cpp
+    WebAssembly/WebAssemblyInstanceObject.cpp
+    WebAssembly/WebAssemblyInstanceObjectPrototype.cpp
     WebAssembly/WebAssemblyMemoryConstructor.cpp
     WebAssembly/WebAssemblyMemoryPrototype.cpp
+    WebAssembly/WebAssemblyModuleConstructor.cpp
+    WebAssembly/WebAssemblyModuleObject.cpp
     WebAssembly/WebAssemblyObject.cpp
-    WebAssembly/WebAssemblyObjectPrototype.cpp
     WebContentClient.cpp
     XHR/EventNames.cpp
     XHR/XMLHttpRequest.cpp

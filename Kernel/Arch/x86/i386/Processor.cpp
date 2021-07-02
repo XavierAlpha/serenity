@@ -17,7 +17,6 @@ namespace Kernel {
 
 #define ENTER_THREAD_CONTEXT_ARGS_SIZE (2 * 4) //  to_thread, from_thread
 extern "C" void thread_context_first_enter(void);
-extern "C" void do_assume_context(Thread* thread, u32 flags);
 extern "C" void exit_kernel_thread(void);
 
 // clang-format off
@@ -61,11 +60,10 @@ asm(
 
 String Processor::platform_string() const
 {
-    // FIXME: other platforms
     return "i386";
 }
 
-u32 Processor::init_context(Thread& thread, bool leave_crit)
+FlatPtr Processor::init_context(Thread& thread, bool leave_crit)
 {
     VERIFY(is_kernel_mode());
     VERIFY(g_scheduler_lock.is_locked());
@@ -193,8 +191,7 @@ void Processor::switch_context(Thread*& from_thread, Thread*& to_thread)
     // Switch to new thread context, passing from_thread and to_thread
     // through to the new context using registers edx and eax
     asm volatile(
-        // NOTE: changing how much we push to the stack affects
-        //       SWITCH_CONTEXT_TO_STACK_SIZE and thread_context_first_enter()!
+        // NOTE: changing how much we push to the stack affects thread_context_first_enter()!
         "pushfl \n"
         "pushl %%ebx \n"
         "pushl %%esi \n"
@@ -235,21 +232,6 @@ void Processor::switch_context(Thread*& from_thread, Thread*& to_thread)
     dbgln_if(CONTEXT_SWITCH_DEBUG, "switch_context <-- from {} {} to {} {}", VirtualAddress(from_thread), *from_thread, VirtualAddress(to_thread), *to_thread);
 
     Processor::current().restore_in_critical(to_thread->saved_critical());
-}
-
-void Processor::assume_context(Thread& thread, FlatPtr flags)
-{
-    dbgln_if(CONTEXT_SWITCH_DEBUG, "Assume context for thread {} {}", VirtualAddress(&thread), thread);
-
-    VERIFY_INTERRUPTS_DISABLED();
-    Scheduler::prepare_after_exec();
-    // in_critical() should be 2 here. The critical section in Process::exec
-    // and then the scheduler lock
-    VERIFY(Processor::current().in_critical() == 2);
-
-    do_assume_context(&thread, flags);
-
-    VERIFY_NOT_REACHED();
 }
 
 UNMAP_AFTER_INIT void Processor::initialize_context_switching(Thread& initial_thread)

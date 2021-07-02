@@ -376,6 +376,17 @@ void WindowManager::tell_wms_super_key_pressed()
     });
 }
 
+void WindowManager::tell_wms_super_space_key_pressed()
+{
+    for_each_window_manager([](WMClientConnection& conn) {
+        if (conn.window_id() < 0)
+            return IterationDecision::Continue;
+
+        conn.async_super_space_key_pressed(conn.window_id());
+        return IterationDecision::Continue;
+    });
+}
+
 static bool window_type_has_title(WindowType type)
 {
     return type == WindowType::Normal || type == WindowType::ToolWindow;
@@ -650,14 +661,18 @@ bool WindowManager::process_ongoing_window_resize(MouseEvent const& event)
     if (event.type() == Event::MouseUp && event.button() == m_resizing_mouse_button) {
         dbgln_if(RESIZE_DEBUG, "[WM] Finish resizing Window({})", m_resize_window);
 
-        auto max_rect = maximized_window_rect(*m_resize_window);
-        if (event.y() > max_rect.bottom()) {
-            dbgln_if(RESIZE_DEBUG, "Should Maximize vertically");
-            m_resize_window->set_vertically_maximized();
-            m_resize_window = nullptr;
-            m_geometry_overlay = nullptr;
-            m_resizing_mouse_button = MouseButton::None;
-            return true;
+        const int vertical_maximize_deadzone = 5;
+        auto& cursor_screen = ScreenInput::the().cursor_location_screen();
+        if (&cursor_screen == &Screen::closest_to_rect(m_resize_window->rect())) {
+            auto desktop_rect = this->desktop_rect(cursor_screen);
+            if (event.y() >= desktop_rect.bottom() - vertical_maximize_deadzone + 1 || event.y() <= desktop_rect.top() + vertical_maximize_deadzone - 1) {
+                dbgln_if(RESIZE_DEBUG, "Should Maximize vertically");
+                m_resize_window->set_vertically_maximized();
+                m_resize_window = nullptr;
+                m_geometry_overlay = nullptr;
+                m_resizing_mouse_button = MouseButton::None;
+                return true;
+            }
         }
 
         Core::EventLoop::current().post_event(*m_resize_window, make<ResizeEvent>(m_resize_window->rect()));
@@ -1245,6 +1260,11 @@ void WindowManager::process_key_event(KeyEvent& event)
         m_previous_event_was_super_keydown = false;
         if (!m_dnd_client && !m_active_input_tracking_window && event.type() == Event::KeyUp && event.key() == Key_Super) {
             tell_wms_super_key_pressed();
+            return;
+        }
+
+        if (event.type() == Event::KeyDown && event.key() == Key_Space) {
+            tell_wms_super_space_key_pressed();
             return;
         }
     }

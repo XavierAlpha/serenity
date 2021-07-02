@@ -7,15 +7,16 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <LibJS/AST.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS {
 
-DeclarativeEnvironmentRecord* new_declarative_environment(EnvironmentRecord&);
-ObjectEnvironmentRecord* new_object_environment(Object&, bool is_with_environment, EnvironmentRecord*);
-EnvironmentRecord& get_this_environment(VM&);
+DeclarativeEnvironment* new_declarative_environment(Environment&);
+ObjectEnvironment* new_object_environment(Object&, bool is_with_environment, Environment*);
+Environment& get_this_environment(VM&);
 Object* get_super_constructor(VM&);
 Value require_object_coercible(GlobalObject&, Value);
 size_t length_of_array_like(GlobalObject&, Object const&);
@@ -24,6 +25,7 @@ FunctionObject* species_constructor(GlobalObject&, Object const&, FunctionObject
 GlobalObject* get_function_realm(GlobalObject&, FunctionObject const&);
 Object* get_prototype_from_constructor(GlobalObject&, FunctionObject const& constructor, Object* (GlobalObject::*intrinsic_default_prototype)());
 Object* create_unmapped_arguments_object(GlobalObject&, Vector<Value> const& arguments);
+Object* create_mapped_arguments_object(GlobalObject&, FunctionObject&, Vector<FunctionNode::Parameter> const&, Vector<Value> const& arguments, Environment&);
 
 enum class CallerMode {
     Strict,

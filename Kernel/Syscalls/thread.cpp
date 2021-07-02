@@ -16,7 +16,7 @@
 
 namespace Kernel {
 
-KResultOr<int> Process::sys$create_thread(void* (*entry)(void*), Userspace<const Syscall::SC_create_thread_params*> user_params)
+KResultOr<FlatPtr> Process::sys$create_thread(void* (*entry)(void*), Userspace<const Syscall::SC_create_thread_params*> user_params)
 {
     REQUIRE_PROMISE(thread);
 
@@ -24,16 +24,16 @@ KResultOr<int> Process::sys$create_thread(void* (*entry)(void*), Userspace<const
     if (!copy_from_user(&params, user_params))
         return EFAULT;
 
-    unsigned detach_state = params.m_detach_state;
-    int schedule_priority = params.m_schedule_priority;
-    unsigned stack_size = params.m_stack_size;
+    unsigned detach_state = params.detach_state;
+    int schedule_priority = params.schedule_priority;
+    unsigned stack_size = params.stack_size;
 
-    auto user_esp = Checked<FlatPtr>((FlatPtr)params.m_stack_location);
-    user_esp += stack_size;
-    if (user_esp.has_overflow())
+    auto user_sp = Checked<FlatPtr>((FlatPtr)params.stack_location);
+    user_sp += stack_size;
+    if (user_sp.has_overflow())
         return EOVERFLOW;
 
-    if (!MM.validate_user_stack(*this, VirtualAddress(user_esp.value() - 4)))
+    if (!MM.validate_user_stack(*this, VirtualAddress(user_sp.value() - 4)))
         return EFAULT;
 
     // FIXME: return EAGAIN if Thread::all_threads().size() is greater than PTHREAD_THREADS_MAX
@@ -65,11 +65,15 @@ KResultOr<int> Process::sys$create_thread(void* (*entry)(void*), Userspace<const
 #if ARCH(I386)
     regs.eip = (FlatPtr)entry;
     regs.eflags = 0x0202;
-    regs.esp = user_esp.value();
+    regs.esp = user_sp.value();
 #else
     regs.rip = (FlatPtr)entry;
     regs.rflags = 0x0202;
-    regs.rsp = user_esp.value();
+    regs.rsp = user_sp.value();
+    regs.rdi = params.rdi;
+    regs.rsi = params.rsi;
+    regs.rdx = params.rdx;
+    regs.rcx = params.rcx;
 #endif
     regs.cr3 = space().page_directory().cr3();
 
@@ -108,7 +112,7 @@ void Process::sys$exit_thread(Userspace<void*> exit_value, Userspace<void*> stac
     VERIFY_NOT_REACHED();
 }
 
-KResultOr<int> Process::sys$detach_thread(pid_t tid)
+KResultOr<FlatPtr> Process::sys$detach_thread(pid_t tid)
 {
     REQUIRE_PROMISE(thread);
     auto thread = Thread::from_tid(tid);
@@ -122,7 +126,7 @@ KResultOr<int> Process::sys$detach_thread(pid_t tid)
     return 0;
 }
 
-KResultOr<int> Process::sys$join_thread(pid_t tid, Userspace<void**> exit_value)
+KResultOr<FlatPtr> Process::sys$join_thread(pid_t tid, Userspace<void**> exit_value)
 {
     REQUIRE_PROMISE(thread);
 
@@ -155,7 +159,7 @@ KResultOr<int> Process::sys$join_thread(pid_t tid, Userspace<void**> exit_value)
     return 0;
 }
 
-KResultOr<int> Process::sys$set_thread_name(pid_t tid, Userspace<const char*> user_name, size_t user_name_length)
+KResultOr<FlatPtr> Process::sys$set_thread_name(pid_t tid, Userspace<const char*> user_name, size_t user_name_length)
 {
     REQUIRE_PROMISE(stdio);
     auto name = copy_string_from_user(user_name, user_name_length);
@@ -174,7 +178,7 @@ KResultOr<int> Process::sys$set_thread_name(pid_t tid, Userspace<const char*> us
     return 0;
 }
 
-KResultOr<int> Process::sys$get_thread_name(pid_t tid, Userspace<char*> buffer, size_t buffer_size)
+KResultOr<FlatPtr> Process::sys$get_thread_name(pid_t tid, Userspace<char*> buffer, size_t buffer_size)
 {
     REQUIRE_PROMISE(thread);
     if (buffer_size == 0)
@@ -194,7 +198,7 @@ KResultOr<int> Process::sys$get_thread_name(pid_t tid, Userspace<char*> buffer, 
     return 0;
 }
 
-KResultOr<int> Process::sys$gettid()
+KResultOr<FlatPtr> Process::sys$gettid()
 {
     REQUIRE_PROMISE(stdio);
     return Thread::current()->tid().value();

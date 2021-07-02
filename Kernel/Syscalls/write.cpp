@@ -11,7 +11,7 @@
 
 namespace Kernel {
 
-KResultOr<size_t> Process::sys$writev(int fd, Userspace<const struct iovec*> iov, int iov_count)
+KResultOr<FlatPtr> Process::sys$writev(int fd, Userspace<const struct iovec*> iov, int iov_count)
 {
     REQUIRE_PROMISE(stdio);
     if (iov_count < 0)
@@ -33,7 +33,7 @@ KResultOr<size_t> Process::sys$writev(int fd, Userspace<const struct iovec*> iov
             return EINVAL;
     }
 
-    auto description = file_description(fd);
+    auto description = fds().file_description(fd);
     if (!description)
         return EBADF;
 
@@ -57,7 +57,7 @@ KResultOr<size_t> Process::sys$writev(int fd, Userspace<const struct iovec*> iov
     return nwritten;
 }
 
-KResultOr<size_t> Process::do_write(FileDescription& description, const UserOrKernelBuffer& data, size_t data_size)
+KResultOr<FlatPtr> Process::do_write(FileDescription& description, const UserOrKernelBuffer& data, size_t data_size)
 {
     size_t total_nwritten = 0;
 
@@ -96,7 +96,7 @@ KResultOr<size_t> Process::do_write(FileDescription& description, const UserOrKe
     return total_nwritten;
 }
 
-KResultOr<size_t> Process::sys$write(int fd, Userspace<const u8*> data, size_t size)
+KResultOr<FlatPtr> Process::sys$write(int fd, Userspace<const u8*> data, size_t size)
 {
     REQUIRE_PROMISE(stdio);
     if (size == 0)
@@ -105,7 +105,7 @@ KResultOr<size_t> Process::sys$write(int fd, Userspace<const u8*> data, size_t s
         return EINVAL;
 
     dbgln_if(IO_DEBUG, "sys$write({}, {}, {})", fd, data.ptr(), size);
-    auto description = file_description(fd);
+    auto description = fds().file_description(fd);
     if (!description)
         return EBADF;
     if (!description->is_writable())
