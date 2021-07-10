@@ -179,7 +179,7 @@ static String double_to_string(double d)
         else
             builder.append('-');
 
-        builder.append(String::number(fabs(exponent - 1)));
+        builder.append(String::number(AK::abs(exponent - 1)));
         return builder.to_string();
     }
 
@@ -193,7 +193,7 @@ static String double_to_string(double d)
     else
         builder.append('-');
 
-    builder.append(String::number(fabs(exponent - 1)));
+    builder.append(String::number(AK::abs(exponent - 1)));
     return builder.to_string();
 }
 
@@ -203,7 +203,7 @@ bool Value::is_array(GlobalObject& global_object) const
     if (!is_object())
         return false;
     auto& object = as_object();
-    if (object.is_array())
+    if (is<Array>(object))
         return true;
     if (is<ProxyObject>(object)) {
         auto& proxy = static_cast<ProxyObject const&>(object);
@@ -219,7 +219,7 @@ bool Value::is_array(GlobalObject& global_object) const
 
 Array& Value::as_array()
 {
-    VERIFY(is_object() && as_object().is_array());
+    VERIFY(is_object() && is<Array>(as_object()));
     return static_cast<Array&>(*m_value.as_object);
 }
 
@@ -258,7 +258,7 @@ bool Value::is_regexp(GlobalObject& global_object) const
     auto matcher = as_object().get(*vm.well_known_symbol_match());
     if (vm.exception())
         return false;
-    if (!matcher.is_empty() && !matcher.is_undefined())
+    if (!matcher.is_undefined())
         return matcher.to_boolean();
 
     return is<RegExpObject>(as_object());
@@ -318,8 +318,6 @@ String Value::to_string_without_side_effects() const
         return String::formatted("[object {}]", as_object().class_name());
     case Type::Accessor:
         return "<accessor>";
-    case Type::NativeProperty:
-        return "<native-property>";
     default:
         VERIFY_NOT_REACHED();
     }
@@ -584,7 +582,7 @@ i32 Value::as_i32() const
 u32 Value::as_u32() const
 {
     VERIFY(as_double() >= 0);
-    return min((u32)as_i32(), NumericLimits<u32>::max());
+    return (u32)min(as_double(), (double)NumericLimits<u32>::max());
 }
 
 double Value::to_double(GlobalObject& global_object) const
@@ -799,6 +797,7 @@ Value Value::get(GlobalObject& global_object, PropertyName const& property_name)
     auto& vm = global_object.vm();
 
     // 1. Assert: IsPropertyKey(P) is true.
+    VERIFY(property_name.is_valid());
 
     // 2. Let O be ? ToObject(V).
     auto* object = to_object(global_object);
@@ -806,7 +805,7 @@ Value Value::get(GlobalObject& global_object, PropertyName const& property_name)
         return {};
 
     // 3. Return ? O.[[Get]](P, V).
-    return object->get(property_name, *this);
+    return object->internal_get(property_name, *this);
 }
 
 // 7.3.10 GetMethod ( V, P ), https://tc39.es/ecma262/#sec-getmethod
@@ -815,9 +814,10 @@ FunctionObject* Value::get_method(GlobalObject& global_object, PropertyName cons
     auto& vm = global_object.vm();
 
     // 1. Assert: IsPropertyKey(P) is true.
+    VERIFY(property_name.is_valid());
 
     // 2. Let func be ? GetV(V, P).
-    auto function = get(global_object, property_name).value_or(js_undefined());
+    auto function = get(global_object, property_name);
     if (vm.exception())
         return nullptr;
 
@@ -1250,6 +1250,7 @@ Value instance_of(GlobalObject& global_object, Value lhs, Value rhs)
     return ordinary_has_instance(global_object, lhs, rhs);
 }
 
+// 7.3.21 OrdinaryHasInstance ( C, O ), https://tc39.es/ecma262/#sec-ordinaryhasinstance
 Value ordinary_has_instance(GlobalObject& global_object, Value lhs, Value rhs)
 {
     auto& vm = global_object.vm();
@@ -1275,7 +1276,7 @@ Value ordinary_has_instance(GlobalObject& global_object, Value lhs, Value rhs)
         return {};
     }
     while (true) {
-        lhs_object = lhs_object->prototype();
+        lhs_object = lhs_object->internal_get_prototype_of();
         if (vm.exception())
             return {};
         if (!lhs_object)

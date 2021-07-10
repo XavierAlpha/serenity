@@ -215,14 +215,14 @@ HTML::HTMLElement* Document::body()
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-document-body
-ExceptionOr<void> Document::set_body(HTML::HTMLElement& new_body)
+ExceptionOr<void> Document::set_body(HTML::HTMLElement* new_body)
 {
     if (!is<HTML::HTMLBodyElement>(new_body) && !is<HTML::HTMLFrameSetElement>(new_body))
         return DOM::HierarchyRequestError::create("Invalid document body element, must be 'body' or 'frameset'");
 
     auto* existing_body = body();
     if (existing_body) {
-        auto replace_result = existing_body->parent()->replace_child(new_body, *existing_body);
+        auto replace_result = existing_body->parent()->replace_child(*new_body, *existing_body);
         if (replace_result.is_exception())
             return replace_result.exception();
         return {};
@@ -232,7 +232,7 @@ ExceptionOr<void> Document::set_body(HTML::HTMLElement& new_body)
     if (!document_element)
         return DOM::HierarchyRequestError::create("Missing document element");
 
-    auto append_result = document_element->append_child(new_body);
+    auto append_result = document_element->append_child(*new_body);
     if (append_result.is_exception())
         return append_result.exception();
     return {};
@@ -625,6 +625,11 @@ JS::Interpreter& Document::interpreter()
 {
     if (!m_interpreter) {
         auto& vm = Bindings::main_thread_vm();
+        m_interpreter = JS::Interpreter::create<Bindings::WindowObject>(vm, *m_window);
+
+        // NOTE: We must hook `on_call_stack_emptied` after the interpreter was created, as the initialization of the
+        // WindowsObject can invoke some internal calls, which will eventually lead to this hook being called without
+        // `m_interpreter` being fully initialized yet.
         // TODO: Hook up vm.on_promise_unhandled_rejection and vm.on_promise_rejection_handled
         // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises#promise_rejection_events
         vm.on_call_stack_emptied = [this] {
@@ -641,7 +646,7 @@ JS::Interpreter& Document::interpreter()
                     auto& object = value.as_object();
                     auto name = object.get_without_side_effects(vm.names.name).value_or(JS::js_undefined());
                     auto message = object.get_without_side_effects(vm.names.message).value_or(JS::js_undefined());
-                    if (name.is_accessor() || name.is_native_property() || message.is_accessor() || message.is_native_property()) {
+                    if (name.is_accessor() || message.is_accessor()) {
                         // The result is not going to be useful, let's just print the value. This affects DOMExceptions, for example.
                         dbgln("Unhandled JavaScript exception: {}", value);
                     } else {
@@ -659,7 +664,6 @@ JS::Interpreter& Document::interpreter()
 
             vm.finish_execution_generation();
         };
-        m_interpreter = JS::Interpreter::create<Bindings::WindowObject>(vm, *m_window);
     }
     return *m_interpreter;
 }

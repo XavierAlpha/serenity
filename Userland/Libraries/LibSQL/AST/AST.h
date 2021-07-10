@@ -13,6 +13,8 @@
 #include <AK/String.h>
 #include <LibSQL/AST/Token.h>
 #include <LibSQL/Forward.h>
+#include <LibSQL/SQLResult.h>
+#include <LibSQL/Type.h>
 
 namespace SQL::AST {
 
@@ -249,16 +251,6 @@ private:
 
     bool m_is_subquery { false };
     NonnullRefPtrVector<TableOrSubquery> m_subqueries {};
-};
-
-enum class Order {
-    Ascending,
-    Descending,
-};
-
-enum class Nulls {
-    First,
-    Last,
 };
 
 class OrderingTerm : public ASTNode {
@@ -674,9 +666,29 @@ private:
 //==================================================================================================
 
 class Statement : public ASTNode {
+public:
+    virtual RefPtr<SQLResult> execute(NonnullRefPtr<Database>) const { return nullptr; }
 };
 
 class ErrorStatement final : public Statement {
+};
+
+class CreateSchema : public Statement {
+public:
+    CreateSchema(String schema_name, bool is_error_if_schema_exists)
+        : m_schema_name(move(schema_name))
+        , m_is_error_if_schema_exists(is_error_if_schema_exists)
+    {
+    }
+
+    const String& schema_name() const { return m_schema_name; }
+    bool is_error_if_schema_exists() const { return m_is_error_if_schema_exists; }
+
+    RefPtr<SQLResult> execute(NonnullRefPtr<Database>) const override;
+
+private:
+    String m_schema_name;
+    bool m_is_error_if_schema_exists;
 };
 
 class CreateTable : public Statement {
@@ -710,6 +722,8 @@ public:
 
     bool is_temporary() const { return m_is_temporary; }
     bool is_error_if_table_exists() const { return m_is_error_if_table_exists; }
+
+    RefPtr<SQLResult> execute(NonnullRefPtr<Database>) const override;
 
 private:
     String m_schema_name;

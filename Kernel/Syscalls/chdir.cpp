@@ -17,7 +17,7 @@ KResultOr<FlatPtr> Process::sys$chdir(Userspace<const char*> user_path, size_t p
     auto path = get_syscall_path_argument(user_path, path_length);
     if (path.is_error())
         return path.error();
-    auto directory_or_error = VFS::the().open_directory(path.value()->view(), current_directory());
+    auto directory_or_error = VirtualFileSystem::the().open_directory(path.value()->view(), current_directory());
     if (directory_or_error.is_error())
         return directory_or_error.error();
     m_cwd = *directory_or_error.value();
@@ -48,7 +48,10 @@ KResultOr<FlatPtr> Process::sys$getcwd(Userspace<char*> buffer, size_t size)
     if (size > NumericLimits<ssize_t>::max())
         return EINVAL;
 
-    auto path = current_directory().absolute_path();
+    auto maybe_path = current_directory().try_create_absolute_path();
+    if (!maybe_path)
+        return ENOMEM;
+    auto& path = *maybe_path;
 
     size_t ideal_size = path.length() + 1;
     auto size_to_copy = min(ideal_size, size);

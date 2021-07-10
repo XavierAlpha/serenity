@@ -147,7 +147,7 @@ void AbstractView::begin_editing(const ModelIndex& index)
     m_edit_widget = m_editing_delegate->widget();
     add_child(*m_edit_widget);
     m_edit_widget->move_to_back();
-    m_edit_widget_content_rect = content_rect(index).translated(frame_thickness(), frame_thickness());
+    m_edit_widget_content_rect = editing_rect(index).translated(frame_thickness(), frame_thickness());
     update_edit_widget_position();
     m_edit_widget->set_focus(true);
     m_editing_delegate->will_begin_editing();
@@ -249,7 +249,12 @@ void AbstractView::set_hovered_index(const ModelIndex& index)
     auto old_index = m_hovered_index;
     m_hovered_index = index;
     did_change_hovered_index(old_index, index);
-    update();
+
+    if (old_index.is_valid())
+        update(to_widget_rect(paint_invalidation_rect(old_index)));
+
+    if (index.is_valid())
+        update(to_widget_rect(paint_invalidation_rect(index)));
 }
 
 void AbstractView::leave_event(Core::Event& event)

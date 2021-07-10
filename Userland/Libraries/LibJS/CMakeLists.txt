@@ -82,7 +82,6 @@ set(SOURCES
     Runtime/MarkedValueList.cpp
     Runtime/MathObject.cpp
     Runtime/NativeFunction.cpp
-    Runtime/NativeProperty.cpp
     Runtime/NumberConstructor.cpp
     Runtime/NumberObject.cpp
     Runtime/NumberPrototype.cpp
@@ -97,7 +96,7 @@ set(SOURCES
     Runtime/PromisePrototype.cpp
     Runtime/PromiseReaction.cpp
     Runtime/PromiseResolvingFunction.cpp
-    Runtime/PropertyAttributes.cpp
+    Runtime/PropertyDescriptor.cpp
     Runtime/ProxyConstructor.cpp
     Runtime/ProxyObject.cpp
     Runtime/Reference.cpp
@@ -105,7 +104,7 @@ set(SOURCES
     Runtime/RegExpConstructor.cpp
     Runtime/RegExpObject.cpp
     Runtime/RegExpPrototype.cpp
-        Runtime/OrdinaryFunctionObject.cpp
+    Runtime/OrdinaryFunctionObject.cpp
     Runtime/Set.cpp
     Runtime/SetConstructor.cpp
     Runtime/SetIterator.cpp
@@ -121,6 +120,15 @@ set(SOURCES
     Runtime/SymbolConstructor.cpp
     Runtime/SymbolObject.cpp
     Runtime/SymbolPrototype.cpp
+    Runtime/Temporal/Instant.cpp
+    Runtime/Temporal/InstantConstructor.cpp
+    Runtime/Temporal/InstantPrototype.cpp
+    Runtime/Temporal/ISO8601.cpp
+    Runtime/Temporal/Now.cpp
+    Runtime/Temporal/Temporal.cpp
+    Runtime/Temporal/TimeZone.cpp
+    Runtime/Temporal/TimeZoneConstructor.cpp
+    Runtime/Temporal/TimeZonePrototype.cpp
     Runtime/TypedArray.cpp
     Runtime/TypedArrayConstructor.cpp
     Runtime/TypedArrayPrototype.cpp

@@ -322,7 +322,7 @@ void Menu::descend_into_submenu_at_hovered_item()
     VERIFY(hovered_item());
     auto submenu = hovered_item()->submenu();
     VERIFY(submenu);
-    MenuManager::the().open_menu(*submenu, false);
+    MenuManager::the().open_menu(*submenu, true);
     submenu->set_hovered_index(0);
     VERIFY(submenu->hovered_item()->type() != MenuItem::Separator);
 }
@@ -498,7 +498,7 @@ void Menu::start_activation_animation(MenuItem& item)
     };
     auto animation = adopt_own(*new AnimationInfo(move(window)));
     auto& timer = animation->timer;
-    timer = Core::Timer::create_repeating(50, [this, animation = animation.ptr(), animation_ref = move(animation)] {
+    timer = Core::Timer::create_repeating(50, [animation = animation.ptr(), animation_ref = move(animation)] {
         VERIFY(animation->step % 2 == 0);
         animation->step -= 2;
         if (animation->step == 0) {
@@ -558,11 +558,8 @@ int Menu::item_index_at(const Gfx::IntPoint& position)
 {
     int i = 0;
     for (auto& item : m_items) {
-        if (item.rect().contains(position)) {
-            if (item.type() == MenuItem::Type::Separator)
-                return -1;
+        if (item.rect().contains(position))
             return i;
-        }
         ++i;
     }
     return -1;
@@ -661,13 +658,13 @@ void Menu::set_hovered_index(int index, bool make_input)
     if (m_hovered_item_index == index)
         return;
     if (auto* old_hovered_item = hovered_item()) {
-        if (client())
+        if (client() && old_hovered_item->type() != MenuItem::Type::Separator)
             client()->async_menu_item_left(m_menu_id, old_hovered_item->identifier());
     }
     m_hovered_item_index = index;
     update_for_new_hovered_item(make_input);
     if (auto* new_hovered_item = hovered_item()) {
-        if (client())
+        if (client() && new_hovered_item->type() != MenuItem::Type::Separator)
             client()->async_menu_item_entered(m_menu_id, new_hovered_item->identifier());
     }
 }

@@ -52,12 +52,14 @@ enum class UsedMemoryRangeType {
     LowMemory = 0,
     Kernel,
     BootModule,
+    PhysicalPages,
 };
 
 static constexpr StringView UserMemoryRangeTypeNames[] {
     "Low memory",
     "Kernel",
     "Boot module",
+    "Physical Pages"
 };
 
 struct UsedMemoryRange {
@@ -68,7 +70,7 @@ struct UsedMemoryRange {
 
 struct ContiguousReservedMemoryRange {
     PhysicalAddress start;
-    size_t length {};
+    PhysicalSize length {};
 };
 
 enum class PhysicalMemoryRangeType {
@@ -83,7 +85,7 @@ enum class PhysicalMemoryRangeType {
 struct PhysicalMemoryRange {
     PhysicalMemoryRangeType type { PhysicalMemoryRangeType::Unknown };
     PhysicalAddress start;
-    size_t length {};
+    PhysicalSize length {};
 };
 
 #define MM Kernel::MemoryManager::the()
@@ -141,8 +143,8 @@ public:
     RefPtr<PhysicalPage> allocate_user_physical_page(ShouldZeroFill = ShouldZeroFill::Yes, bool* did_purge = nullptr);
     RefPtr<PhysicalPage> allocate_supervisor_physical_page();
     NonnullRefPtrVector<PhysicalPage> allocate_contiguous_supervisor_physical_pages(size_t size, size_t physical_alignment = PAGE_SIZE);
-    void deallocate_user_physical_page(const PhysicalPage&);
-    void deallocate_supervisor_physical_page(const PhysicalPage&);
+    void deallocate_user_physical_page(PhysicalAddress);
+    void deallocate_supervisor_physical_page(PhysicalAddress);
 
     OwnPtr<Region> allocate_contiguous_kernel_region(size_t, StringView name, Region::Access access, size_t physical_alignment = PAGE_SIZE, Region::Cacheable = Region::Cacheable::Yes);
     OwnPtr<Region> allocate_kernel_region(size_t, StringView name, Region::Access access, AllocationStrategy strategy = AllocationStrategy::Reserve, Region::Cacheable = Region::Cacheable::Yes);
@@ -151,12 +153,20 @@ public:
     OwnPtr<Region> allocate_kernel_region_with_vmobject(VMObject&, size_t, StringView name, Region::Access access, Region::Cacheable = Region::Cacheable::Yes);
     OwnPtr<Region> allocate_kernel_region_with_vmobject(const Range&, VMObject&, StringView name, Region::Access access, Region::Cacheable = Region::Cacheable::Yes);
 
-    unsigned user_physical_pages() const { return m_user_physical_pages; }
-    unsigned user_physical_pages_used() const { return m_user_physical_pages_used; }
-    unsigned user_physical_pages_committed() const { return m_user_physical_pages_committed; }
-    unsigned user_physical_pages_uncommitted() const { return m_user_physical_pages_uncommitted; }
-    unsigned super_physical_pages() const { return m_super_physical_pages; }
-    unsigned super_physical_pages_used() const { return m_super_physical_pages_used; }
+    struct SystemMemoryInfo {
+        PhysicalSize user_physical_pages { 0 };
+        PhysicalSize user_physical_pages_used { 0 };
+        PhysicalSize user_physical_pages_committed { 0 };
+        PhysicalSize user_physical_pages_uncommitted { 0 };
+        PhysicalSize super_physical_pages { 0 };
+        PhysicalSize super_physical_pages_used { 0 };
+    };
+
+    SystemMemoryInfo get_system_memory_info()
+    {
+        ScopedSpinLock lock(s_mm_lock);
+        return m_system_memory_info;
+    }
 
     template<IteratorFunction<VMObject&> Callback>
     static void for_each_vmobject(Callback callback)
@@ -187,10 +197,14 @@ public:
     const Vector<UsedMemoryRange>& used_memory_ranges() { return m_used_memory_ranges; }
     bool is_allowed_to_mmap_to_userspace(PhysicalAddress, const Range&) const;
 
+    PhysicalPageEntry& get_physical_page_entry(PhysicalAddress);
+    PhysicalAddress get_physical_address(PhysicalPage const&);
+
 private:
     MemoryManager();
     ~MemoryManager();
 
+    void initialize_physical_pages();
     void register_reserved_ranges();
 
     void register_vmobject(VMObject&);
@@ -208,7 +222,12 @@ private:
     static Region* find_region_from_vaddr(VirtualAddress);
 
     RefPtr<PhysicalPage> find_free_user_physical_page(bool);
-    u8* quickmap_page(PhysicalPage&);
+
+    ALWAYS_INLINE u8* quickmap_page(PhysicalPage& page)
+    {
+        return quickmap_page(page.paddr());
+    }
+    u8* quickmap_page(PhysicalAddress const&);
     void unquickmap_page();
 
     PageDirectoryEntry* quickmap_pd(PageDirectory&, size_t pdpt_index);
@@ -223,15 +242,14 @@ private:
     RefPtr<PhysicalPage> m_shared_zero_page;
     RefPtr<PhysicalPage> m_lazy_committed_page;
 
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_user_physical_pages { 0 };
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_user_physical_pages_used { 0 };
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_user_physical_pages_committed { 0 };
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_user_physical_pages_uncommitted { 0 };
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_super_physical_pages { 0 };
-    Atomic<unsigned, AK::MemoryOrder::memory_order_relaxed> m_super_physical_pages_used { 0 };
+    SystemMemoryInfo m_system_memory_info;
 
     NonnullRefPtrVector<PhysicalRegion> m_user_physical_regions;
     NonnullRefPtrVector<PhysicalRegion> m_super_physical_regions;
+    RefPtr<PhysicalRegion> m_physical_pages_region;
+    PhysicalPageEntry* m_physical_page_entries { nullptr };
+    size_t m_physical_page_entries_free { 0 };
+    size_t m_physical_page_entries_count { 0 };
 
     Region::List m_user_regions;
     Region::List m_kernel_regions;

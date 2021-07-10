@@ -15,6 +15,7 @@
 #include <LibWeb/DOM/Comment.h>
 #include <LibWeb/DOM/DocumentType.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/DOM/EventListener.h>
@@ -405,15 +406,14 @@ ExceptionOr<NonnullRefPtr<Node>> Node::replace_child(NonnullRefPtr<Node> node, N
 }
 
 // https://dom.spec.whatwg.org/#concept-node-clone
-NonnullRefPtr<Node> Node::clone_node(Document* document, bool clone_children) const
+NonnullRefPtr<Node> Node::clone_node(Document* document, bool clone_children)
 {
     if (!document)
         document = m_document;
     RefPtr<Node> copy;
     if (is<Element>(this)) {
         auto& element = *verify_cast<Element>(this);
-        auto qualified_name = QualifiedName(element.local_name(), element.prefix(), element.namespace_());
-        auto element_copy = adopt_ref(*new Element(*document, move(qualified_name)));
+        auto element_copy = DOM::create_element(*document, element.local_name(), element.namespace_() /* FIXME: node’s namespace prefix, and node’s is value, with the synchronous custom elements flag unset */);
         element.for_each_attribute([&](auto& name, auto& value) {
             element_copy->set_attribute(name, value);
         });
@@ -446,12 +446,17 @@ NonnullRefPtr<Node> Node::clone_node(Document* document, bool clone_children) co
         auto processing_instruction = verify_cast<ProcessingInstruction>(this);
         auto processing_instruction_copy = adopt_ref(*new ProcessingInstruction(*document, processing_instruction->data(), processing_instruction->target()));
         copy = move(processing_instruction_copy);
+    } else if (is<DocumentFragment>(this)) {
+        auto document_fragment_copy = adopt_ref(*new DocumentFragment(*document));
+        copy = move(document_fragment_copy);
     } else {
         dbgln("clone_node() not implemented for NodeType {}", (u16)m_type);
         TODO();
     }
     // FIXME: 4. Set copy’s node document and document to copy, if copy is a document, and set copy’s node document to document otherwise.
-    // FIXME: 5. Run any cloning steps defined for node in other applicable specifications and pass copy, node, document and the clone children flag if set, as parameters.
+
+    cloned(*copy, clone_children);
+
     if (clone_children) {
         for_each_child([&](auto& child) {
             copy->append_child(child.clone_node(document, true));
@@ -461,7 +466,7 @@ NonnullRefPtr<Node> Node::clone_node(Document* document, bool clone_children) co
 }
 
 // https://dom.spec.whatwg.org/#dom-node-clonenode
-ExceptionOr<NonnullRefPtr<Node>> Node::clone_node_binding(bool deep) const
+ExceptionOr<NonnullRefPtr<Node>> Node::clone_node_binding(bool deep)
 {
     if (is<ShadowRoot>(*this))
         return NotSupportedError::create("Cannot clone shadow root");
@@ -635,6 +640,19 @@ void Node::serialize_tree_as_json(JsonObjectSerializer<StringBuilder>& object) c
             child.serialize_tree_as_json(child_object);
         });
     }
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#concept-n-noscript
+bool Node::is_scripting_disabled() const
+{
+    // FIXME: or when scripting is disabled for its relevant settings object.
+    return !document().browsing_context();
+}
+
+// https://dom.spec.whatwg.org/#dom-node-contains
+bool Node::contains(RefPtr<Node> other) const
+{
+    return other && other->is_inclusive_descendant_of(*this);
 }
 
 }

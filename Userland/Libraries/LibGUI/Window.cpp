@@ -35,8 +35,8 @@ static IDAllocator s_window_id_allocator;
 
 class WindowBackingStore {
 public:
-    WindowBackingStore(NonnullRefPtr<Gfx::Bitmap> bitmap)
-        : m_bitmap(bitmap)
+    explicit WindowBackingStore(NonnullRefPtr<Gfx::Bitmap> bitmap)
+        : m_bitmap(move(bitmap))
         , m_serial(++s_next_backing_store_serial)
     {
     }
@@ -146,6 +146,7 @@ void Window::show()
         m_resizable,
         m_fullscreen,
         m_frameless,
+        m_forced_shadow,
         m_accessory,
         m_opacity_when_windowless,
         m_alpha_hit_threshold,
@@ -807,7 +808,7 @@ OwnPtr<WindowBackingStore> Window::create_backing_store(const Gfx::IntSize& size
     }
 
     // FIXME: Plumb scale factor here eventually.
-    auto bitmap = Gfx::Bitmap::create_with_anonymous_buffer(format, buffer, size, 1, {});
+    auto bitmap = Gfx::Bitmap::create_with_anonymous_buffer(format, move(buffer), size, 1, {});
     if (!bitmap) {
         VERIFY(size.width() <= INT16_MAX);
         VERIFY(size.height() <= INT16_MAX);
@@ -911,7 +912,7 @@ void Window::set_fullscreen(bool fullscreen)
     m_fullscreen = fullscreen;
     if (!is_visible())
         return;
-    WindowServerConnection::the().set_fullscreen(m_window_id, fullscreen);
+    WindowServerConnection::the().async_set_fullscreen(m_window_id, fullscreen);
 }
 
 void Window::set_frameless(bool frameless)
@@ -921,10 +922,20 @@ void Window::set_frameless(bool frameless)
     m_frameless = frameless;
     if (!is_visible())
         return;
-    WindowServerConnection::the().set_frameless(m_window_id, frameless);
+    WindowServerConnection::the().async_set_frameless(m_window_id, frameless);
 
     if (!frameless)
         apply_icon();
+}
+
+void Window::set_forced_shadow(bool shadow)
+{
+    if (m_forced_shadow == shadow)
+        return;
+    m_forced_shadow = shadow;
+    if (!is_visible())
+        return;
+    WindowServerConnection::the().async_set_forced_shadow(m_window_id, shadow);
 }
 
 bool Window::is_maximized() const
@@ -937,6 +948,7 @@ bool Window::is_maximized() const
 
 void Window::set_maximized(bool maximized)
 {
+    VERIFY(m_window_id != 0);
     WindowServerConnection::the().async_set_maximized(m_window_id, maximized);
 }
 

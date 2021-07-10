@@ -65,17 +65,19 @@ Nobody is perfect, and sometimes we mess things up. That said, here are some goo
 
 ## Pull Request Q&A
 
-### I've submitted a PR and it passes CI. When can I expect to get first reviewer feedback?
+### I've submitted a PR and it passes CI. When can I expect to get some review feedback?
 
-While unadvertised PR's may get randomly merged by curious reviewers, you will have a much smoother time if you engage with the community on Discord.
+While unadvertised PR's may get randomly merged by curious maintainers, you will have a much smoother time if you engage with the community on Discord.
 
-### If my PR isn't getting attention, how long should I wait before pinging one of the project reviewers?
+### If my PR isn't getting attention, how long should I wait before pinging one of the project maintainers?
 
-Ping them right away if it's something urgent! If it's less urgent, advertise your PR on Discord and ask if someone could review it.
+Ping them right away if it's something urgent! If it's less urgent, advertise your PR on Discord (`#code-review`) and ask if someone could review it.
 
-### Who are the project reviewers?
+### Who are the project maintainers?
 
-The project reviewers at this time are @awesomekling, @linusg and @alimpfard.
+The project maintainers at this time are [@awesomekling](https://github.com/awesomekling), [@linusg](https://github.com/linusg), [@alimpfard](https://github.com/alimpfard), and [@gunnarbeutner](https://github.com/gunnarbeutner).
+
+Maintainership is by invitation only and does not correlate with any particular metric.
 
 ### Is there a policy for branches/PRs that haven't been touched in X days? Should they be closed?
 
@@ -88,3 +90,16 @@ In theory, the best person to speak with is whoever wrote most code adjacent to 
 ### Is Discord the place to ask for review help, or is Github preferred?
 
 It's definitely better to ask on Discord. Due to the volume of GitHub notifications, many of us turn them off and rely on Discord for learning about review requests.
+
+## Commit Hooks
+
+The repository contains a file called `.pre-commit-config.yaml` that defines several 'commit hooks' that can be run automatically just before and after creating a new commit. These hooks lint your commit message, and the changes it contains to ensure they will pass the automated CI for pull requests.
+To enable these hooks firstly follow the installation instructions available at https://pre-commit.com/#install and then enable one or both of the following hooks:
+ - pre-commit hook - Runs Meta/lint-ci.sh and Meta/lint-ports.py to ensure changes to the code will pass linting:
+   ```console
+   pre-commit install
+   ```
+ - post-commit hook - Lints the commit message to ensure it will pass the commit linting:
+   ```console
+   pre-commit install --hook-type commit-msg
+   ```

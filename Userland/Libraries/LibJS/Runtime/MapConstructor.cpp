@@ -24,11 +24,11 @@ void MapConstructor::initialize(GlobalObject& global_object)
     NativeFunction::initialize(global_object);
 
     // 24.1.2.1 Map.prototype, https://tc39.es/ecma262/#sec-map.prototype
-    define_property(vm.names.prototype, global_object.map_prototype(), 0);
-
-    define_property(vm.names.length, Value(0), Attribute::Configurable);
+    define_direct_property(vm.names.prototype, global_object.map_prototype(), 0);
 
     define_native_accessor(*vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
+
+    define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 }
 
 MapConstructor::~MapConstructor()
@@ -70,10 +70,10 @@ Value MapConstructor::construct(FunctionObject& new_target)
             vm.throw_exception<TypeError>(global_object, ErrorType::NotAnObject, String::formatted("Iterator value {}", iterator_value.to_string_without_side_effects()));
             return IterationDecision::Break;
         }
-        auto key = iterator_value.as_object().get(0).value_or(js_undefined());
+        auto key = iterator_value.as_object().get(0);
         if (vm.exception())
             return IterationDecision::Break;
-        auto value = iterator_value.as_object().get(1).value_or(js_undefined());
+        auto value = iterator_value.as_object().get(1);
         if (vm.exception())
             return IterationDecision::Break;
         (void)vm.call(adder.as_function(), Value(map), key, value);

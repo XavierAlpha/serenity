@@ -17,6 +17,7 @@
 #include <AK/WeakPtr.h>
 #include <AK/Weakable.h>
 #include <Kernel/API/Syscall.h>
+#include <Kernel/AtomicEdgeAction.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/FileSystem/InodeMetadata.h>
 #include <Kernel/Forward.h>
@@ -276,7 +277,6 @@ public:
     KResultOr<FlatPtr> sys$dbgputstr(Userspace<const u8*>, size_t);
     KResultOr<FlatPtr> sys$dump_backtrace();
     KResultOr<FlatPtr> sys$gettid();
-    KResultOr<FlatPtr> sys$donate(pid_t tid);
     KResultOr<FlatPtr> sys$setsid();
     KResultOr<FlatPtr> sys$getsid(pid_t);
     KResultOr<FlatPtr> sys$setpgid(pid_t pid, pid_t pgid);
@@ -385,6 +385,7 @@ public:
     KResultOr<FlatPtr> sys$detach_thread(pid_t tid);
     KResultOr<FlatPtr> sys$set_thread_name(pid_t tid, Userspace<const char*> buffer, size_t buffer_size);
     KResultOr<FlatPtr> sys$get_thread_name(pid_t tid, Userspace<char*> buffer, size_t buffer_size);
+    KResultOr<FlatPtr> sys$kill_thread(pid_t tid, int signal);
     KResultOr<FlatPtr> sys$rename(Userspace<const Syscall::SC_rename_params*>);
     KResultOr<FlatPtr> sys$mknod(Userspace<const Syscall::SC_mknod_params*>);
     KResultOr<FlatPtr> sys$halt();
@@ -570,6 +571,7 @@ private:
 
     RefPtr<ProcessGroup> m_pg;
 
+    AtomicEdgeAction<u32> m_protected_data_refs;
     void protect_data();
     void unprotect_data();
 

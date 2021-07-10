@@ -196,13 +196,35 @@ private:
 
     [[nodiscard]] RulePosition push_start() { return { *this, position() }; }
 
+    struct Scope : public RefCounted<Scope> {
+        enum Type {
+            Function,
+            Block,
+        };
+        struct HoistableDeclaration {
+            NonnullRefPtr<FunctionDeclaration> declaration;
+            NonnullRefPtr<Scope> scope; // where it is actually declared
+        };
+
+        Type type;
+        RefPtr<Scope> parent;
+
+        NonnullRefPtrVector<FunctionDeclaration> function_declarations;
+        Vector<HoistableDeclaration> hoisted_function_declarations;
+
+        HashTable<FlyString> lexical_declarations;
+
+        explicit Scope(Type, RefPtr<Scope>);
+        RefPtr<Scope> get_current_function_scope();
+    };
+
     struct ParserState {
         Lexer lexer;
         Token current_token;
         Vector<Error> errors;
         Vector<NonnullRefPtrVector<VariableDeclaration>> var_scopes;
         Vector<NonnullRefPtrVector<VariableDeclaration>> let_scopes;
-        Vector<NonnullRefPtrVector<FunctionDeclaration>> function_scopes;
+        RefPtr<Scope> current_scope;
 
         Vector<Vector<FunctionNode::Parameter>&> function_parameters;
 

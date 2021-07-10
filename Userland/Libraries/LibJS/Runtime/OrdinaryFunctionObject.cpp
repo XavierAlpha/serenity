@@ -24,18 +24,6 @@
 
 namespace JS {
 
-static OrdinaryFunctionObject* typed_this(VM& vm, GlobalObject& global_object)
-{
-    auto* this_object = vm.this_value(global_object).to_object(global_object);
-    if (!this_object)
-        return nullptr;
-    if (!this_object->is_function()) {
-        vm.throw_exception<TypeError>(global_object, ErrorType::NotAFunctionNoParam);
-        return nullptr;
-    }
-    return static_cast<OrdinaryFunctionObject*>(this_object);
-}
-
 OrdinaryFunctionObject* OrdinaryFunctionObject::create(GlobalObject& global_object, const FlyString& name, const Statement& body, Vector<FunctionNode::Parameter> parameters, i32 m_function_length, Environment* parent_scope, FunctionKind kind, bool is_strict, bool is_arrow_function)
 {
     Object* prototype = nullptr;
@@ -90,17 +78,17 @@ void OrdinaryFunctionObject::initialize(GlobalObject& global_object)
         auto* prototype = vm.heap().allocate<Object>(global_object, *global_object.new_ordinary_function_prototype_object_shape());
         switch (m_kind) {
         case FunctionKind::Regular:
-            prototype->define_property(vm.names.constructor, this, Attribute::Writable | Attribute::Configurable);
+            prototype->define_property_or_throw(vm.names.constructor, { .value = this, .writable = true, .enumerable = false, .configurable = true });
             break;
         case FunctionKind::Generator:
             // prototype is "g1.prototype" in figure-2 (https://tc39.es/ecma262/img/figure-2.png)
-            prototype->set_prototype(global_object.generator_object_prototype());
+            prototype->internal_set_prototype_of(global_object.generator_object_prototype());
             break;
         }
-        define_property(vm.names.prototype, prototype, Attribute::Writable);
+        define_direct_property(vm.names.prototype, prototype, Attribute::Writable);
     }
-    define_native_property(vm.names.length, length_getter, {}, Attribute::Configurable);
-    define_native_property(vm.names.name, name_getter, {}, Attribute::Configurable);
+    define_property_or_throw(vm.names.length, { .value = Value(m_function_length), .writable = false, .enumerable = false, .configurable = true });
+    define_property_or_throw(vm.names.name, { .value = js_string(vm, m_name.is_null() ? "" : m_name), .writable = false, .enumerable = false, .configurable = true });
 }
 
 OrdinaryFunctionObject::~OrdinaryFunctionObject()
@@ -166,7 +154,7 @@ Value OrdinaryFunctionObject::execute_function_body()
                 [&](const auto& param) {
                     Value argument_value;
                     if (parameter.is_rest) {
-                        auto* array = Array::create(global_object());
+                        auto* array = Array::create(global_object(), 0);
                         for (size_t rest_index = i; rest_index < execution_context_arguments.size(); ++rest_index)
                             array->indexed_properties().append(execution_context_arguments[rest_index]);
                         argument_value = move(array);
@@ -246,20 +234,13 @@ Value OrdinaryFunctionObject::construct(FunctionObject&)
     return execute_function_body();
 }
 
-JS_DEFINE_NATIVE_GETTER(OrdinaryFunctionObject::length_getter)
+void OrdinaryFunctionObject::set_name(const FlyString& name)
 {
-    auto* function = typed_this(vm, global_object);
-    if (!function)
-        return {};
-    return Value(static_cast<i32>(function->m_function_length));
-}
-
-JS_DEFINE_NATIVE_GETTER(OrdinaryFunctionObject::name_getter)
-{
-    auto* function = typed_this(vm, global_object);
-    if (!function)
-        return {};
-    return js_string(vm, function->name().is_null() ? "" : function->name());
+    VERIFY(!name.is_null());
+    auto& vm = this->vm();
+    m_name = name;
+    auto success = define_property_or_throw(vm.names.name, { .value = js_string(vm, m_name), .writable = false, .enumerable = false, .configurable = true });
+    VERIFY(success);
 }
 
 }

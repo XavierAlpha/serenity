@@ -19,8 +19,6 @@ public:
     virtual ~RegExpPrototype() override;
 
 private:
-    static RegexResult do_match(const Regex<ECMA262>&, const StringView&);
-
     JS_DECLARE_NATIVE_GETTER(flags);
     JS_DECLARE_NATIVE_GETTER(source);
 
@@ -29,6 +27,8 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(to_string);
     JS_DECLARE_NATIVE_FUNCTION(symbol_match);
     JS_DECLARE_NATIVE_FUNCTION(symbol_replace);
+    JS_DECLARE_NATIVE_FUNCTION(symbol_search);
+    JS_DECLARE_NATIVE_FUNCTION(symbol_split);
 
 #define __JS_ENUMERATE(_, flag_name, ...) \
     JS_DECLARE_NATIVE_GETTER(flag_name);

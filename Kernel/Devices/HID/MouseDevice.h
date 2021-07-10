@@ -29,7 +29,7 @@ public:
     virtual bool can_write(const FileDescription&, size_t) const override { return true; }
 
     // ^HIDDevice
-    virtual Type instrument_type() const { return Type::Mouse; }
+    virtual Type instrument_type() const override { return Type::Mouse; }
 
     // ^Device
     virtual mode_t required_mode() const override { return 0440; }
@@ -39,7 +39,7 @@ public:
 protected:
     MouseDevice();
     // ^CharacterDevice
-    virtual const char* class_name() const override { return "MouseDevice"; }
+    virtual StringView class_name() const override { return "MouseDevice"; }
 
     mutable SpinLock<u8> m_queue_lock;
     CircularQueue<MousePacket, 100> m_queue;

@@ -46,6 +46,7 @@ namespace JS {
     P(SQRT2)                                 \
     P(String)                                \
     P(Symbol)                                \
+    P(Temporal)                              \
     P(UTC)                                   \
     P(abs)                                   \
     P(acos)                                  \
@@ -112,6 +113,10 @@ namespace JS {
     P(endsWith)                              \
     P(entries)                               \
     P(enumerable)                            \
+    P(epochMicroseconds)                     \
+    P(epochMilliseconds)                     \
+    P(epochNanoseconds)                      \
+    P(epochSeconds)                          \
     P(error)                                 \
     P(errors)                                \
     P(escape)                                \
@@ -138,6 +143,10 @@ namespace JS {
     P(fromCharCode)                          \
     P(fromCodePoint)                         \
     P(fromEntries)                           \
+    P(fromEpochMicroseconds)                 \
+    P(fromEpochMilliseconds)                 \
+    P(fromEpochNanoseconds)                  \
+    P(fromEpochSeconds)                      \
     P(fround)                                \
     P(gc)                                    \
     P(get)                                   \
@@ -156,6 +165,7 @@ namespace JS {
     P(getMinutes)                            \
     P(getMonth)                              \
     P(getOwnPropertyDescriptor)              \
+    P(getOwnPropertyDescriptors)             \
     P(getOwnPropertyNames)                   \
     P(getOwnPropertySymbols)                 \
     P(getPrototypeOf)                        \
@@ -178,16 +188,20 @@ namespace JS {
     P(globalThis)                            \
     P(groups)                                \
     P(has)                                   \
+    P(hasIndices)                            \
     P(hasOwn)                                \
     P(hasOwnProperty)                        \
     P(hypot)                                 \
+    P(id)                                    \
     P(ignoreCase)                            \
     P(imul)                                  \
     P(includes)                              \
     P(index)                                 \
     P(indexOf)                               \
+    P(indices)                               \
     P(info)                                  \
     P(input)                                 \
+    P(instant)                               \
     P(is)                                    \
     P(isArray)                               \
     P(isExtensible)                          \
@@ -291,6 +305,7 @@ namespace JS {
     P(strike)                                \
     P(stringify)                             \
     P(sub)                                   \
+    P(subarray)                              \
     P(substr)                                \
     P(substring)                             \
     P(sup)                                   \
@@ -298,6 +313,7 @@ namespace JS {
     P(tanh)                                  \
     P(test)                                  \
     P(then)                                  \
+    P(timeZone)                              \
     P(toDateString)                          \
     P(toFixed)                               \
     P(toGMTString)                           \
@@ -308,6 +324,7 @@ namespace JS {
     P(toLocaleTimeString)                    \
     P(toLowerCase)                           \
     P(toString)                              \
+    P(toTemporalInstant)                     \
     P(toTimeString)                          \
     P(toUpperCase)                           \
     P(toUTCString)                           \
@@ -341,6 +358,9 @@ struct CommonPropertyNames {
 #undef __ENUMERATE
 #define __JS_ENUMERATE(x, a, b, c, t) PropertyName x { #x, PropertyName::StringMayBeNumber::No };
     JS_ENUMERATE_BUILTIN_TYPES
+#undef __JS_ENUMERATE
+#define __JS_ENUMERATE(x, a, b, c) PropertyName x { #x, PropertyName::StringMayBeNumber::No };
+    JS_ENUMERATE_TEMPORAL_OBJECTS
 #undef __JS_ENUMERATE
 #define __JS_ENUMERATE(x, a) PropertyName x { #x, PropertyName::StringMayBeNumber::No };
     JS_ENUMERATE_WELL_KNOWN_SYMBOLS

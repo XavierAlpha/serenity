@@ -59,7 +59,8 @@ enum class QuirksMode;
 namespace Web::HTML {
 class CanvasRenderingContext2D;
 class CloseEvent;
-class EventHandler;
+class DOMParser;
+struct EventHandler;
 class HTMLAnchorElement;
 class HTMLAreaElement;
 class HTMLAudioElement;
@@ -211,6 +212,7 @@ class DocumentTypeWrapper;
 class DocumentWrapper;
 class DOMExceptionWrapper;
 class DOMImplementationWrapper;
+class DOMParserWrapper;
 class ElementWrapper;
 class EventListenerWrapper;
 class EventTargetWrapper;

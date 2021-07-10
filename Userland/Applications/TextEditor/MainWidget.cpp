@@ -44,6 +44,7 @@
 namespace TextEditor {
 
 MainWidget::MainWidget()
+    : m_file_system_access_client(FileSystemAccessClient::construct())
 {
     load_from_gml(text_editor_window_gml);
 
@@ -244,7 +245,7 @@ MainWidget::MainWidget()
     m_editor->on_cursor_change = [this] { update_statusbar(); };
     m_editor->on_selection_change = [this] { update_statusbar(); };
 
-    m_new_action = GUI::Action::create("&New", { Mod_Ctrl, Key_N }, Gfx::Bitmap::load_from_file("/res/icons/16x16/new.png"), [this](const GUI::Action&) {
+    m_new_action = GUI::Action::create("&New", { Mod_Ctrl, Key_N }, Gfx::Bitmap::load_from_file("/res/icons/16x16/new.png"), [this](GUI::Action const&) {
         if (editor().document().is_modified()) {
             auto save_document_first_result = GUI::MessageBox::show(window(), "Save changes to current document first?", "Warning", GUI::MessageBox::Type::Warning, GUI::MessageBox::InputType::YesNoCancel);
             if (save_document_first_result == GUI::Dialog::ExecResult::ExecYes)
@@ -259,9 +260,9 @@ MainWidget::MainWidget()
     });
 
     m_open_action = GUI::CommonActions::make_open_action([this](auto&) {
-        Optional<String> open_path = GUI::FilePicker::get_open_filepath(window());
+        auto fd_response = m_file_system_access_client->prompt_open_file(Core::StandardPaths::home_directory(), Core::OpenMode::ReadWrite);
 
-        if (!open_path.has_value())
+        if (fd_response.error() != 0)
             return;
 
         if (editor().document().is_modified()) {
@@ -272,28 +273,36 @@ MainWidget::MainWidget()
                 return;
         }
 
-        open_file(open_path.value());
+        read_file_and_close(fd_response.fd()->take_fd(), fd_response.chosen_file().value());
     });
 
     m_save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
-        Optional<String> save_path = GUI::FilePicker::get_save_filepath(window(), m_name.is_null() ? "Untitled" : m_name, m_extension.is_null() ? "txt" : m_extension);
-        if (!save_path.has_value())
+        auto response = m_file_system_access_client->prompt_save_file(m_name.is_null() ? "Untitled" : m_name, m_extension.is_null() ? "txt" : m_extension, Core::StandardPaths::home_directory(), Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
+
+        if (response.error() != 0)
             return;
 
-        if (!m_editor->write_to_file(save_path.value())) {
+        if (!m_editor->write_to_file_and_close(response.fd()->take_fd())) {
             GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
             return;
         }
         // FIXME: It would be cool if this would propagate from GUI::TextDocument somehow.
         window()->set_modified(false);
 
-        set_path(save_path.value());
-        dbgln("Wrote document to {}", save_path.value());
+        set_path(response.chosen_file().value());
+        dbgln("Wrote document to {}", response.chosen_file().value());
     });
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
         if (!m_path.is_empty()) {
-            if (!m_editor->write_to_file(m_path)) {
+            auto response = m_file_system_access_client->request_file(m_path, Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
+
+            if (response.error() != 0)
+                return;
+
+            int fd = response.fd()->take_fd();
+
+            if (!m_editor->write_to_file_and_close(fd)) {
                 GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
             } else {
                 // FIXME: It would be cool if this would propagate from GUI::TextDocument somehow.
@@ -647,10 +656,12 @@ void MainWidget::update_title()
     window()->set_title(builder.to_string());
 }
 
-bool MainWidget::open_file(const String& path)
+bool MainWidget::read_file_and_close(int fd, String const& path)
 {
-    auto file = Core::File::construct(path);
-    if (!file->open(Core::OpenMode::ReadOnly) && file->error() != ENOENT) {
+    VERIFY(path.starts_with("/"sv));
+    auto file = Core::File::construct();
+
+    if (!file->open(fd, Core::OpenMode::ReadOnly, Core::File::ShouldCloseFileDescriptor::Yes) && file->error() != ENOENT) {
         GUI::MessageBox::show(window(), String::formatted("Opening \"{}\" failed: {}", path, strerror(errno)), "Error", GUI::MessageBox::Type::Error);
         return false;
     }
@@ -706,7 +717,12 @@ void MainWidget::drop_event(GUI::DropEvent& event)
             GUI::MessageBox::show(window(), "TextEditor can only open one file at a time!", "One at a time please!", GUI::MessageBox::Type::Error);
             return;
         }
-        open_file(urls.first().path());
+        auto file_response = m_file_system_access_client->request_file(urls.first().path(), Core::OpenMode::ReadOnly);
+
+        if (file_response.error() != 0)
+            return;
+
+        read_file_and_close(file_response.fd()->take_fd(), urls.first().path());
     }
 }
 
@@ -735,6 +751,7 @@ void MainWidget::set_preview_mode(PreviewMode mode)
         update_markdown_preview();
     } else {
         m_no_preview_action->set_checked(true);
+        m_editor->set_fixed_width(-1);
         set_web_view_visible(false);
     }
 }

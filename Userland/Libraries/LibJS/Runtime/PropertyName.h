@@ -31,7 +31,7 @@ public:
             return {};
         if (value.is_symbol())
             return value.as_symbol();
-        if (value.is_integral_number() && value.as_double() >= 0 && value.as_double() <= NumericLimits<u32>::max())
+        if (value.is_integral_number() && value.as_double() >= 0 && value.as_double() < NumericLimits<u32>::max())
             return value.as_u32();
         auto string = value.to_string(global_object);
         if (string.is_null())
@@ -43,14 +43,21 @@ public:
 
     template<Integral T>
     PropertyName(T index)
-        : m_type(Type::Number)
-        , m_number(index)
     {
         // FIXME: Replace this with requires(IsUnsigned<T>)?
         //        Needs changes in various places using `int` (but not actually being in the negative range)
         VERIFY(index >= 0);
-        if constexpr (NumericLimits<T>::max() > NumericLimits<u32>::max())
-            VERIFY(index <= NumericLimits<u32>::max());
+        if constexpr (NumericLimits<T>::max() >= NumericLimits<u32>::max()) {
+            if (index >= NumericLimits<u32>::max()) {
+                m_string = String::number(index);
+                m_type = Type::String;
+                m_string_may_be_number = false;
+                return;
+            }
+        }
+
+        m_type = Type::Number;
+        m_number = index;
     }
 
     PropertyName(char const* chars)
@@ -131,7 +138,7 @@ public:
         }
 
         auto property_index = m_string.to_uint(TrimWhitespace::No);
-        if (!property_index.has_value()) {
+        if (!property_index.has_value() || property_index.value() == NumericLimits<u32>::max()) {
             m_string_may_be_number = false;
             return false;
         }
@@ -174,17 +181,6 @@ public:
         if (is_string())
             return StringOrSymbol(as_string());
         return StringOrSymbol(as_symbol());
-    }
-
-    Value to_value(VM& vm) const
-    {
-        if (is_string())
-            return js_string(vm, m_string);
-        if (is_number())
-            return Value(m_number);
-        if (is_symbol())
-            return m_symbol;
-        return js_undefined();
     }
 
 private:
@@ -230,9 +226,14 @@ namespace AK {
 
 template<>
 struct Formatter<JS::PropertyName> : Formatter<StringView> {
-    void format(FormatBuilder& builder, JS::PropertyName const& value)
+    void format(FormatBuilder& builder, JS::PropertyName const& property_name)
     {
-        Formatter<StringView>::format(builder, value.to_string());
+        if (!property_name.is_valid())
+            Formatter<StringView>::format(builder, "<invalid PropertyName>");
+        else if (property_name.is_number())
+            Formatter<StringView>::format(builder, String::number(property_name.as_number()));
+        else
+            Formatter<StringView>::format(builder, property_name.to_string_or_symbol().to_display_string());
     }
 };
 

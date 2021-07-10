@@ -68,9 +68,9 @@ void StringPrototype::initialize(GlobalObject& global_object)
     define_native_function(vm.names.padEnd, pad_end, 1, attr);
     define_native_function(vm.names.trim, trim, 0, attr);
     define_native_function(vm.names.trimStart, trim_start, 0, attr);
-    define_property(vm.names.trimLeft, get_without_side_effects(vm.names.trimStart), attr);
+    define_direct_property(vm.names.trimLeft, get_without_side_effects(vm.names.trimStart), attr);
     define_native_function(vm.names.trimEnd, trim_end, 0, attr);
-    define_property(vm.names.trimRight, get_without_side_effects(vm.names.trimEnd), attr);
+    define_direct_property(vm.names.trimRight, get_without_side_effects(vm.names.trimEnd), attr);
     define_native_function(vm.names.concat, concat, 1, attr);
     define_native_function(vm.names.substr, substr, 2, attr);
     define_native_function(vm.names.substring, substring, 2, attr);
@@ -82,6 +82,7 @@ void StringPrototype::initialize(GlobalObject& global_object)
     define_native_function(vm.names.match, match, 1, attr);
     define_native_function(vm.names.matchAll, match_all, 1, attr);
     define_native_function(vm.names.replace, replace, 2, attr);
+    define_native_function(vm.names.replaceAll, replace_all, 2, attr);
     define_native_function(vm.names.search, search, 1, attr);
     define_native_function(vm.names.anchor, anchor, 1, attr);
     define_native_function(vm.names.big, big, 0, attr);
@@ -408,7 +409,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::trim_end)
     return js_string(vm, Utf8View(*string).trim(whitespace_characters, TrimMode::Right).as_string());
 }
 
-// 22.1.3.23 String.prototype.substring ( start, end ), https://tc39.es/ecma262/#sec-string.prototype.substring
+// 22.1.3.4 String.prototype.concat ( ...args ), https://tc39.es/ecma262/#sec-string.prototype.concat
 JS_DEFINE_NATIVE_FUNCTION(StringPrototype::concat)
 {
     auto string = ak_string_from(vm, global_object);
@@ -575,28 +576,30 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::slice)
 // 22.1.3.21 String.prototype.split ( separator, limit ), https://tc39.es/ecma262/#sec-string.prototype.split
 JS_DEFINE_NATIVE_FUNCTION(StringPrototype::split)
 {
-    auto separator_argument = vm.argument(0);
-    auto limit_argument = vm.argument(1);
-
-    auto this_value = require_object_coercible(global_object, vm.this_value(global_object));
+    auto object = require_object_coercible(global_object, vm.this_value(global_object));
     if (vm.exception())
         return {};
+
+    auto separator_argument = vm.argument(0);
+    auto limit_argument = vm.argument(1);
 
     if (!separator_argument.is_nullish()) {
         auto splitter = separator_argument.get_method(global_object, *vm.well_known_symbol_split());
         if (vm.exception())
             return {};
         if (splitter)
-            return vm.call(*splitter, separator_argument, this_value, limit_argument);
+            return vm.call(*splitter, separator_argument, object, limit_argument);
     }
 
-    auto string = this_value.to_string(global_object);
+    auto string = object.to_string(global_object);
+    if (vm.exception())
+        return {};
 
-    auto* result = Array::create(global_object);
-    size_t result_len = 0;
+    auto* array = Array::create(global_object, 0);
+    size_t array_length = 0;
 
     auto limit = NumericLimits<u32>::max();
-    if (!vm.argument(1).is_undefined()) {
+    if (!limit_argument.is_undefined()) {
         limit = limit_argument.to_u32(global_object);
         if (vm.exception())
             return {};
@@ -607,49 +610,41 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::split)
         return {};
 
     if (limit == 0)
-        return result;
+        return array;
 
-    if (vm.argument(0).is_undefined()) {
-        result->define_property(0, js_string(vm, string));
-        return result;
+    if (separator_argument.is_undefined()) {
+        array->create_data_property_or_throw(0, js_string(vm, string));
+        return array;
     }
 
-    auto len = string.length();
-    auto separator_len = separator.length();
-    if (len == 0) {
-        if (separator_len > 0)
-            result->define_property(0, js_string(vm, string));
-        return result;
+    if (string.length() == 0) {
+        if (!separator.is_empty())
+            array->create_data_property_or_throw(0, js_string(vm, string));
+        return array;
     }
 
     size_t start = 0;
-    auto pos = start;
-    if (separator_len == 0) {
-        for (pos = 0; pos < len; pos++)
-            result->define_property(pos, js_string(vm, string.substring(pos, 1)));
-        return result;
-    }
-
-    while (pos != len) {
-        auto e = split_match(string, pos, separator);
-        if (!e.has_value()) {
-            pos += 1;
+    auto position = start;
+    while (position != string.length()) {
+        auto match = split_match(string, position, separator);
+        if (!match.has_value() || match.value() == start) {
+            ++position;
             continue;
         }
 
-        auto segment = string.substring_view(start, pos - start);
-        result->define_property(result_len, js_string(vm, segment));
-        result_len++;
-        if (result_len == limit)
-            return result;
-        start = e.value();
-        pos = start;
+        auto segment = string.substring_view(start, position - start);
+        array->create_data_property_or_throw(array_length, js_string(vm, segment));
+        ++array_length;
+        if (array_length == limit)
+            return array;
+        start = match.value();
+        position = start;
     }
 
-    auto rest = string.substring(start, len - start);
-    result->define_property(result_len, js_string(vm, rest));
+    auto rest = string.substring(start);
+    array->create_data_property_or_throw(array_length, js_string(vm, rest));
 
-    return result;
+    return array;
 }
 
 // 22.1.3.9 String.prototype.lastIndexOf ( searchString [ , position ] ), https://tc39.es/ecma262/#sec-string.prototype.lastindexof
@@ -731,6 +726,8 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::match)
     if (!regexp.is_nullish()) {
         if (auto* matcher = regexp.get_method(global_object, *vm.well_known_symbol_match()))
             return vm.call(*matcher, regexp, this_object);
+        if (vm.exception())
+            return {};
     }
     auto s = this_object.to_string(global_object);
     if (vm.exception())
@@ -738,7 +735,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::match)
     auto rx = regexp_create(global_object, regexp, js_undefined());
     if (!rx)
         return {};
-    return rx->invoke(vm.well_known_symbol_match(), js_string(vm, s));
+    return rx->invoke(*vm.well_known_symbol_match(), js_string(vm, s));
 }
 
 // 22.1.3.12 String.prototype.matchAll ( regexp ), https://tc39.es/ecma262/#sec-string.prototype.matchall
@@ -753,7 +750,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::match_all)
         if (vm.exception())
             return {};
         if (is_regexp) {
-            auto flags = regexp.as_object().get("flags").value_or(js_undefined());
+            auto flags = regexp.as_object().get("flags");
             if (vm.exception())
                 return {};
             auto flags_object = require_object_coercible(global_object, flags);
@@ -763,7 +760,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::match_all)
             if (vm.exception())
                 return {};
             if (!flags_string.contains("g")) {
-                vm.throw_exception<TypeError>(global_object, ErrorType::StringMatchAllNonGlobalRegExp);
+                vm.throw_exception<TypeError>(global_object, ErrorType::StringNonGlobalRegExp);
                 return {};
             }
         }
@@ -778,7 +775,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::match_all)
     auto rx = regexp_create(global_object, regexp, js_string(vm, "g"));
     if (!rx)
         return {};
-    return rx->invoke(vm.well_known_symbol_match_all(), js_string(vm, s));
+    return rx->invoke(*vm.well_known_symbol_match_all(), js_string(vm, s));
 }
 
 // 22.1.3.17 String.prototype.replace ( searchValue, replaceValue ), https://tc39.es/ecma262/#sec-string.prototype.replace
@@ -793,6 +790,8 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace)
     if (!search_value.is_nullish()) {
         if (auto* replacer = search_value.get_method(global_object, *vm.well_known_symbol_replace()))
             return vm.call(*replacer, search_value, this_object, replace_value);
+        if (vm.exception())
+            return {};
     }
 
     auto string = this_object.to_string(global_object);
@@ -801,6 +800,17 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace)
     auto search_string = search_value.to_string(global_object);
     if (vm.exception())
         return {};
+
+    if (!replace_value.is_function()) {
+        auto replace_string = replace_value.to_string(global_object);
+        if (vm.exception())
+            return {};
+
+        replace_value = js_string(vm, move(replace_string));
+        if (vm.exception())
+            return {};
+    }
+
     Optional<size_t> position = string.find(search_string);
     if (!position.has_value())
         return js_string(vm, string);
@@ -809,7 +819,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace)
     String replacement;
 
     if (replace_value.is_function()) {
-        auto result = vm.call(replace_value.as_function(), js_undefined(), search_value, Value(position.value()), js_string(vm, string));
+        auto result = vm.call(replace_value.as_function(), js_undefined(), js_string(vm, search_string), Value(position.value()), js_string(vm, string));
         if (vm.exception())
             return {};
 
@@ -817,8 +827,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace)
         if (vm.exception())
             return {};
     } else {
-        // FIXME: Implement the GetSubstituion algorithm for substituting placeholder '$' characters - https://tc39.es/ecma262/#sec-getsubstitution
-        replacement = replace_value.to_string(global_object);
+        replacement = get_substitution(global_object, search_string, string, *position, {}, js_undefined(), replace_value);
         if (vm.exception())
             return {};
     }
@@ -829,6 +838,106 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace)
     builder.append(string.substring(position.value() + search_string.length()));
 
     return js_string(vm, builder.build());
+}
+
+// 22.1.3.18 String.prototype.replaceAll ( searchValue, replaceValue ), https://tc39.es/ecma262/#sec-string.prototype.replaceall
+JS_DEFINE_NATIVE_FUNCTION(StringPrototype::replace_all)
+{
+    auto this_object = require_object_coercible(global_object, vm.this_value(global_object));
+    if (vm.exception())
+        return {};
+    auto search_value = vm.argument(0);
+    auto replace_value = vm.argument(1);
+
+    if (!search_value.is_nullish()) {
+        bool is_regexp = search_value.is_regexp(global_object);
+        if (vm.exception())
+            return {};
+
+        if (is_regexp) {
+            auto flags = search_value.as_object().get(vm.names.flags);
+            if (vm.exception())
+                return {};
+            auto flags_object = require_object_coercible(global_object, flags);
+            if (vm.exception())
+                return {};
+            auto flags_string = flags_object.to_string(global_object);
+            if (vm.exception())
+                return {};
+            if (!flags_string.contains("g")) {
+                vm.throw_exception<TypeError>(global_object, ErrorType::StringNonGlobalRegExp);
+                return {};
+            }
+        }
+
+        auto* replacer = search_value.get_method(global_object, *vm.well_known_symbol_replace());
+        if (vm.exception())
+            return {};
+        if (replacer) {
+            auto result = vm.call(*replacer, search_value, this_object, replace_value);
+            if (vm.exception())
+                return {};
+            return result;
+        }
+    }
+
+    auto string = this_object.to_string(global_object);
+    if (vm.exception())
+        return {};
+    auto search_string = search_value.to_string(global_object);
+    if (vm.exception())
+        return {};
+
+    if (!replace_value.is_function()) {
+        auto replace_string = replace_value.to_string(global_object);
+        if (vm.exception())
+            return {};
+
+        replace_value = js_string(vm, move(replace_string));
+        if (vm.exception())
+            return {};
+    }
+
+    Vector<size_t> match_positions;
+    size_t advance_by = max(1u, search_string.length());
+    auto position = string.find(search_string);
+
+    while (position.has_value()) {
+        match_positions.append(*position);
+        position = string.find(search_string, *position + advance_by);
+    }
+
+    size_t end_of_last_match = 0;
+    StringBuilder result;
+
+    for (auto position : match_positions) {
+        auto preserved = string.substring_view(end_of_last_match, position - end_of_last_match);
+        String replacement;
+
+        if (replace_value.is_function()) {
+            auto result = vm.call(replace_value.as_function(), js_undefined(), js_string(vm, search_string), Value(position), js_string(vm, string));
+            if (vm.exception())
+                return {};
+
+            replacement = result.to_string(global_object);
+            if (vm.exception())
+                return {};
+        } else {
+            replacement = get_substitution(global_object, search_string, string, position, {}, js_undefined(), replace_value);
+            if (vm.exception())
+                return {};
+        }
+
+        result.append(preserved);
+        result.append(replacement);
+
+        end_of_last_match = position + search_string.length();
+    }
+
+    if (end_of_last_match < string.length())
+        result.append(string.substring_view(end_of_last_match));
+
+    return js_string(vm, result.build());
 }
 
 // 22.1.3.19 String.prototype.search ( regexp ), https://tc39.es/ecma262/#sec-string.prototype.search
@@ -850,7 +959,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringPrototype::search)
     auto rx = regexp_create(global_object, regexp, js_undefined());
     if (!rx)
         return {};
-    return rx->invoke(vm.well_known_symbol_search(), js_string(vm, s));
+    return rx->invoke(*vm.well_known_symbol_search(), js_string(vm, s));
 }
 
 // B.2.3.2.1 CreateHTML ( string, tag, attribute, value ), https://tc39.es/ecma262/#sec-createhtml

@@ -31,10 +31,9 @@ public:
     enum Type {
         Var = 1,
         Let = 2,
-        Function = 3,
     };
 
-    ScopePusher(Parser& parser, unsigned mask)
+    ScopePusher(Parser& parser, unsigned mask, Parser::Scope::Type scope_type)
         : m_parser(parser)
         , m_mask(mask)
     {
@@ -42,8 +41,8 @@ public:
             m_parser.m_state.var_scopes.append(NonnullRefPtrVector<VariableDeclaration>());
         if (m_mask & Let)
             m_parser.m_state.let_scopes.append(NonnullRefPtrVector<VariableDeclaration>());
-        if (m_mask & Function)
-            m_parser.m_state.function_scopes.append(NonnullRefPtrVector<FunctionDeclaration>());
+
+        m_parser.m_state.current_scope = create<Parser::Scope>(scope_type, m_parser.m_state.current_scope);
     }
 
     ~ScopePusher()
@@ -52,8 +51,41 @@ public:
             m_parser.m_state.var_scopes.take_last();
         if (m_mask & Let)
             m_parser.m_state.let_scopes.take_last();
-        if (m_mask & Function)
-            m_parser.m_state.function_scopes.take_last();
+
+        auto& popped = m_parser.m_state.current_scope;
+        // Manual clear required to resolve circular references
+        popped->hoisted_function_declarations.clear();
+
+        m_parser.m_state.current_scope = popped->parent;
+    }
+
+    void add_to_scope_node(NonnullRefPtr<ScopeNode> scope_node)
+    {
+        if (m_mask & Var)
+            scope_node->add_variables(m_parser.m_state.var_scopes.last());
+        if (m_mask & Let)
+            scope_node->add_variables(m_parser.m_state.let_scopes.last());
+
+        auto& scope = m_parser.m_state.current_scope;
+        scope_node->add_functions(scope->function_declarations);
+
+        for (auto& hoistable_function : scope->hoisted_function_declarations) {
+            if (is_hoistable(hoistable_function)) {
+                scope_node->add_hoisted_function(hoistable_function.declaration);
+            }
+        }
+    }
+
+    static bool is_hoistable(Parser::Scope::HoistableDeclaration& declaration)
+    {
+        auto& name = declaration.declaration->name();
+        // See if we find any conflicting lexical declaration on the way up
+        for (RefPtr<Parser::Scope> scope = declaration.scope; !scope.is_null(); scope = scope->parent) {
+            if (scope->lexical_declarations.contains(name)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     Parser& m_parser;
@@ -180,6 +212,24 @@ Parser::ParserState::ParserState(Lexer l)
 {
 }
 
+Parser::Scope::Scope(Parser::Scope::Type type, RefPtr<Parser::Scope> parent_scope)
+    : type(type)
+    , parent(move(parent_scope))
+{
+}
+
+RefPtr<Parser::Scope> Parser::Scope::get_current_function_scope()
+{
+    if (this->type == Parser::Scope::Function) {
+        return *this;
+    }
+    auto result = this->parent;
+    while (result->type != Parser::Scope::Function) {
+        result = result->parent;
+    }
+    return result;
+}
+
 Parser::Parser(Lexer lexer)
     : m_state(move(lexer))
 {
@@ -229,7 +279,7 @@ Associativity Parser::operator_associativity(TokenType type) const
 NonnullRefPtr<Program> Parser::parse_program(bool starts_in_strict_mode)
 {
     auto rule_start = push_start();
-    ScopePusher scope(*this, ScopePusher::Var | ScopePusher::Let | ScopePusher::Function);
+    ScopePusher scope(*this, ScopePusher::Var | ScopePusher::Let, Scope::Function);
     auto program = adopt_ref(*new Program({ m_filename, rule_start.position(), position() }));
     if (starts_in_strict_mode) {
         program->set_strict_mode();
@@ -258,9 +308,7 @@ NonnullRefPtr<Program> Parser::parse_program(bool starts_in_strict_mode)
         first = false;
     }
     if (m_state.var_scopes.size() == 1) {
-        program->add_variables(m_state.var_scopes.last());
-        program->add_variables(m_state.let_scopes.last());
-        program->add_functions(m_state.function_scopes.last());
+        scope.add_to_scope_node(program);
     } else {
         syntax_error("Unclosed lexical_environment");
     }
@@ -276,7 +324,9 @@ NonnullRefPtr<Declaration> Parser::parse_declaration()
         return parse_class_declaration();
     case TokenType::Function: {
         auto declaration = parse_function_node<FunctionDeclaration>();
-        m_state.function_scopes.last().append(declaration);
+        m_state.current_scope->function_declarations.append(declaration);
+        auto hoisting_target = m_state.current_scope->get_current_function_scope();
+        hoisting_target->hoisted_function_declarations.append({ declaration, *m_state.current_scope });
         return declaration;
     }
     case TokenType::Let:
@@ -348,7 +398,6 @@ NonnullRefPtr<Statement> Parser::parse_statement()
 RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expect_parens)
 {
     save_state();
-    m_state.var_scopes.append(NonnullRefPtrVector<VariableDeclaration>());
     auto rule_start = push_start();
 
     ArmedScopeGuard state_rollback_guard = [&] {
@@ -400,7 +449,10 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
         TemporaryChange change(m_state.in_arrow_function_context, true);
         if (match(TokenType::CurlyOpen)) {
             // Parse a function body with statements
-            return parse_block_statement(is_strict);
+            ScopePusher scope(*this, ScopePusher::Var, Scope::Function);
+            auto body = parse_block_statement(is_strict);
+            scope.add_to_scope_node(body);
+            return body;
         }
         if (match_expression()) {
             // Parse a function body which returns a single expression
@@ -426,7 +478,7 @@ RefPtr<FunctionExpression> Parser::try_parse_arrow_function_expression(bool expe
         auto body = function_body_result.release_nonnull();
         return create_ast_node<FunctionExpression>(
             { m_state.current_token.filename(), rule_start.position(), position() }, "", move(body),
-            move(parameters), function_length, m_state.var_scopes.take_last(), FunctionKind::Regular, is_strict, true);
+            move(parameters), function_length, FunctionKind::Regular, is_strict, true);
     }
 
     return nullptr;
@@ -615,20 +667,19 @@ NonnullRefPtr<ClassExpression> Parser::parse_class_expression(bool expect_class_
         if (!super_class.is_null()) {
             // Set constructor to the result of parsing the source text
             // constructor(... args){ super (...args);}
-            auto super_call = create_ast_node<CallExpression>(
+            auto super_call = create_ast_node<SuperCall>(
                 { m_state.current_token.filename(), rule_start.position(), position() },
-                create_ast_node<SuperExpression>({ m_state.current_token.filename(), rule_start.position(), position() }),
                 Vector { CallExpression::Argument { create_ast_node<Identifier>({ m_state.current_token.filename(), rule_start.position(), position() }, "args"), true } });
             constructor_body->append(create_ast_node<ExpressionStatement>({ m_state.current_token.filename(), rule_start.position(), position() }, move(super_call)));
             constructor_body->add_variables(m_state.var_scopes.last());
 
             constructor = create_ast_node<FunctionExpression>(
                 { m_state.current_token.filename(), rule_start.position(), position() }, class_name, move(constructor_body),
-                Vector { FunctionNode::Parameter { FlyString { "args" }, nullptr, true } }, 0, NonnullRefPtrVector<VariableDeclaration>(), FunctionKind::Regular, true);
+                Vector { FunctionNode::Parameter { FlyString { "args" }, nullptr, true } }, 0, FunctionKind::Regular, true);
         } else {
             constructor = create_ast_node<FunctionExpression>(
                 { m_state.current_token.filename(), rule_start.position(), position() }, class_name, move(constructor_body),
-                Vector<FunctionNode::Parameter> {}, 0, NonnullRefPtrVector<VariableDeclaration>(), FunctionKind::Regular, true);
+                Vector<FunctionNode::Parameter> {}, 0, FunctionKind::Regular, true);
         }
     }
 
@@ -738,7 +789,7 @@ NonnullRefPtr<RegExpLiteral> Parser::parse_regexp_literal()
         HashTable<char> seen_flags;
         for (size_t i = 0; i < flags.length(); ++i) {
             auto flag = flags.substring_view(i, 1);
-            if (!flag.is_one_of("g", "i", "m", "s", "u", "y"))
+            if (!flag.is_one_of("d", "g", "i", "m", "s", "u", "y"))
                 syntax_error(String::formatted("Invalid RegExp flag '{}'", flag), Position { flags_start.line, flags_start.column + i });
             if (seen_flags.contains(*flag.characters_without_null_termination()))
                 syntax_error(String::formatted("Repeated RegExp flag '{}'", flag), Position { flags_start.line, flags_start.column + i });
@@ -1288,6 +1339,9 @@ NonnullRefPtr<CallExpression> Parser::parse_call_expression(NonnullRefPtr<Expres
 
     consume(TokenType::ParenClose);
 
+    if (is<SuperExpression>(*lhs))
+        return create_ast_node<SuperCall>({ m_state.current_token.filename(), rule_start.position(), position() }, move(arguments));
+
     return create_ast_node<CallExpression>({ m_state.current_token.filename(), rule_start.position(), position() }, move(lhs), move(arguments));
 }
 
@@ -1371,7 +1425,7 @@ NonnullRefPtr<BlockStatement> Parser::parse_block_statement()
 NonnullRefPtr<BlockStatement> Parser::parse_block_statement(bool& is_strict)
 {
     auto rule_start = push_start();
-    ScopePusher scope(*this, ScopePusher::Let);
+    ScopePusher scope(*this, ScopePusher::Let, Parser::Scope::Block);
     auto block = create_ast_node<BlockStatement>({ m_state.current_token.filename(), rule_start.position(), position() });
     consume(TokenType::CurlyOpen);
 
@@ -1403,8 +1457,7 @@ NonnullRefPtr<BlockStatement> Parser::parse_block_statement(bool& is_strict)
     m_state.strict_mode = initial_strict_mode_state;
     m_state.string_legacy_octal_escape_sequence_in_scope = false;
     consume(TokenType::CurlyClose);
-    block->add_variables(m_state.let_scopes.last());
-    block->add_functions(m_state.function_scopes.last());
+    scope.add_to_scope_node(block);
     return block;
 }
 
@@ -1417,7 +1470,7 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u8 parse_options)
     TemporaryChange super_property_access_rollback(m_state.allow_super_property_lookup, !!(parse_options & FunctionNodeParseOptions::AllowSuperPropertyLookup));
     TemporaryChange super_constructor_call_rollback(m_state.allow_super_constructor_call, !!(parse_options & FunctionNodeParseOptions::AllowSuperConstructorCall));
 
-    ScopePusher scope(*this, ScopePusher::Var | ScopePusher::Function);
+    ScopePusher scope(*this, ScopePusher::Var, Parser::Scope::Function);
 
     constexpr auto is_function_expression = IsSame<FunctionNodeType, FunctionExpression>;
     auto is_generator = (parse_options & FunctionNodeParseOptions::IsGeneratorFunction) != 0;
@@ -1459,11 +1512,11 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u8 parse_options)
 
     m_state.function_parameters.take_last();
 
-    body->add_variables(m_state.var_scopes.last());
-    body->add_functions(m_state.function_scopes.last());
+    scope.add_to_scope_node(body);
+
     return create_ast_node<FunctionNodeType>(
         { m_state.current_token.filename(), rule_start.position(), position() },
-        name, move(body), move(parameters), function_length, NonnullRefPtrVector<VariableDeclaration>(),
+        name, move(body), move(parameters), function_length,
         is_generator ? FunctionKind::Generator : FunctionKind::Regular, is_strict);
 }
 
@@ -1729,10 +1782,23 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(bool for_l
         consume_or_insert_semicolon();
 
     auto declaration = create_ast_node<VariableDeclaration>({ m_state.current_token.filename(), rule_start.position(), position() }, declaration_kind, move(declarations));
-    if (declaration_kind == DeclarationKind::Var)
+    if (declaration_kind == DeclarationKind::Var) {
         m_state.var_scopes.last().append(declaration);
-    else
+    } else {
         m_state.let_scopes.last().append(declaration);
+
+        for (auto& declarator : declaration->declarations()) {
+            declarator.target().visit(
+                [&](const NonnullRefPtr<Identifier>& id) {
+                    m_state.current_scope->lexical_declarations.set(id->string());
+                },
+                [&](const NonnullRefPtr<BindingPattern>& binding) {
+                    binding->for_each_bound_name([&](const auto& name) {
+                        m_state.current_scope->lexical_declarations.set(name);
+                    });
+                });
+        }
+    }
     return declaration;
 }
 
@@ -1961,10 +2027,10 @@ NonnullRefPtr<IfStatement> Parser::parse_if_statement()
         // Code matching this production is processed as if each matching occurrence of
         // FunctionDeclaration[?Yield, ?Await, ~Default] was the sole StatementListItem
         // of a BlockStatement occupying that position in the source code.
-        ScopePusher scope(*this, ScopePusher::Let);
+        ScopePusher scope(*this, ScopePusher::Let, Parser::Scope::Block);
         auto block = create_ast_node<BlockStatement>({ m_state.current_token.filename(), rule_start.position(), position() });
         block->append(parse_declaration());
-        block->add_functions(m_state.function_scopes.last());
+        scope.add_to_scope_node(block);
         return block;
     };
 
@@ -2002,6 +2068,11 @@ NonnullRefPtr<Statement> Parser::parse_for_statement()
     consume(TokenType::ParenOpen);
 
     bool in_scope = false;
+    ScopeGuard guard([&]() {
+        if (in_scope)
+            m_state.let_scopes.take_last();
+    });
+
     RefPtr<ASTNode> init;
     if (!match(TokenType::Semicolon)) {
         if (match_expression()) {
@@ -2043,10 +2114,6 @@ NonnullRefPtr<Statement> Parser::parse_for_statement()
     TemporaryChange break_change(m_state.in_break_context, true);
     TemporaryChange continue_change(m_state.in_continue_context, true);
     auto body = parse_statement();
-
-    if (in_scope) {
-        m_state.let_scopes.take_last();
-    }
 
     return create_ast_node<ForStatement>({ m_state.current_token.filename(), rule_start.position(), position() }, move(init), move(test), move(update), move(body));
 }

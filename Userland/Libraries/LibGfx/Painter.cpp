@@ -177,14 +177,45 @@ void Painter::fill_rect_with_checkerboard(const IntRect& a_rect, const IntSize& 
     RGBA32* dst = m_target->scanline(rect.top()) + rect.left();
     const size_t dst_skip = m_target->pitch() / sizeof(RGBA32);
 
+    int first_cell_column = rect.x() / cell_size.width();
+    int prologue_length = min(rect.width(), cell_size.width() - (rect.x() % cell_size.width()));
+    int number_of_aligned_strips = (rect.width() - prologue_length) / cell_size.width();
+
     for (int i = 0; i < rect.height(); ++i) {
         int y = rect.y() + i;
         int cell_row = y / cell_size.height();
-        for (int j = 0; j < rect.width(); ++j) {
-            int x = rect.x() + j;
-            int cell_col = x / cell_size.width();
-            dst[j] = ((cell_row % 2) ^ (cell_col % 2)) ? color_light.value() : color_dark.value();
+        bool odd_row = cell_row & 1;
+
+        // Prologue: Paint the unaligned part up to the first intersection.
+        int j = 0;
+        int cell_column = first_cell_column;
+
+        {
+            bool odd_cell = cell_column & 1;
+            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+            fast_u32_fill(&dst[j], color, prologue_length);
+            j += prologue_length;
         }
+
+        // Aligned run: Paint the maximum number of aligned cell strips.
+        for (int strip = 0; strip < number_of_aligned_strips; ++strip) {
+            ++cell_column;
+            bool odd_cell = cell_column & 1;
+            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+            fast_u32_fill(&dst[j], color, cell_size.width());
+            j += cell_size.width();
+        }
+
+        // Epilogue: Paint the unaligned part until the end of the rect.
+        if (j != rect.width()) {
+            ++cell_column;
+            bool odd_cell = cell_column & 1;
+            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+            int epilogue_length = rect.width() - j;
+            fast_u32_fill(&dst[j], color, epilogue_length);
+            j += epilogue_length;
+        }
+
         dst += dst_skip;
     }
 }
@@ -1676,12 +1707,15 @@ void Painter::draw_physical_pixel(const IntPoint& physical_position, Color color
     fill_physical_rect(rect, color);
 }
 
-void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int thickness, LineStyle style)
+void Painter::draw_line(IntPoint const& a_p1, IntPoint const& a_p2, Color color, int thickness, LineStyle style)
 {
     if (color.alpha() == 0)
         return;
 
     auto clip_rect = this->clip_rect() * scale();
+
+    auto const p1 = thickness > 1 ? a_p1.translated(-(thickness / 2), -(thickness / 2)) : a_p1;
+    auto const p2 = thickness > 1 ? a_p2.translated(-(thickness / 2), -(thickness / 2)) : a_p2;
 
     auto point1 = to_physical(p1);
     auto point2 = to_physical(p2);
@@ -1871,7 +1905,7 @@ void Painter::for_each_line_segment_on_elliptical_arc(const FloatPoint& p1, cons
     if (theta_delta < 0) {
         swap(start, end);
         theta_1 = theta_1 + theta_delta;
-        theta_delta = fabs(theta_delta);
+        theta_delta = fabsf(theta_delta);
     }
 
     auto relative_start = start - center;

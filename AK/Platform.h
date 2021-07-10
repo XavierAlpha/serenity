@@ -25,6 +25,10 @@
 
 #define ARCH(arch) (defined(AK_ARCH_##arch) && AK_ARCH_##arch)
 
+#if !defined(__clang__)
+#    define AK_HAS_CONDITIONALLY_TRIVIAL
+#endif
+
 #ifdef ALWAYS_INLINE
 #    undef ALWAYS_INLINE
 #endif
@@ -50,6 +54,11 @@
 #endif
 #define NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
 
+#ifdef NAKED
+#    undef NAKED
+#endif
+#define NAKED __attribute__((naked))
+
 // GCC doesn't have __has_feature but clang does
 #ifndef __has_feature
 #    define __has_feature(...) 0
@@ -70,18 +79,19 @@
 #    define PAGE_SIZE sysconf(_SC_PAGESIZE)
 #endif
 
+#ifndef _BOOTLOADER
 ALWAYS_INLINE int count_trailing_zeroes_32(unsigned int val)
 {
-#if defined(__GNUC__) || defined(__clang__)
+#    if defined(__GNUC__) || defined(__clang__)
     return __builtin_ctz(val);
-#else
+#    else
     for (u8 i = 0; i < 32; ++i) {
         if ((val >> i) & 1) {
             return i;
         }
     }
     return 0;
-#endif
+#    endif
 }
 
 ALWAYS_INLINE int count_trailing_zeroes_32_safe(unsigned int val)
@@ -90,6 +100,7 @@ ALWAYS_INLINE int count_trailing_zeroes_32_safe(unsigned int val)
         return 32;
     return count_trailing_zeroes_32(val);
 }
+#endif
 
 #ifdef AK_OS_BSD_GENERIC
 #    define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC

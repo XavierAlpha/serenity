@@ -101,9 +101,9 @@ int main(int argc, char** argv)
                 auto image_title = dialog->image_name().trim_whitespace();
                 image->set_title(image_title.is_empty() ? "Untitled" : image_title);
 
-                auto& image_editor = create_new_editor(*image);
+                create_new_editor(*image);
                 layer_list_widget.set_image(image);
-                image_editor.set_active_layer(bg_layer);
+                layer_list_widget.set_selected_layer(bg_layer);
             }
         },
         window);
@@ -157,7 +157,8 @@ int main(int argc, char** argv)
                 auto save_path = GUI::FilePicker::get_save_filepath(window, "untitled", "bmp");
                 if (!save_path.has_value())
                     return;
-                auto result = editor->image().export_bmp_to_file(save_path.value());
+                auto preserve_alpha_channel = GUI::MessageBox::show(window, "Do you wish to preserve transparency?", "Preserve transparency?", GUI::MessageBox::Type::Question, GUI::MessageBox::InputType::YesNo);
+                auto result = editor->image().export_bmp_to_file(save_path.value(), preserve_alpha_channel == GUI::MessageBox::ExecYes);
                 if (result.is_error())
                     GUI::MessageBox::show_error(window, String::formatted("Export to BMP failed: {}", result.error()));
             },
@@ -169,7 +170,8 @@ int main(int argc, char** argv)
                 auto save_path = GUI::FilePicker::get_save_filepath(window, "untitled", "png");
                 if (!save_path.has_value())
                     return;
-                auto result = editor->image().export_bmp_to_file(save_path.value());
+                auto preserve_alpha_channel = GUI::MessageBox::show(window, "Do you wish to preserve transparency?", "Preserve transparency?", GUI::MessageBox::Type::Question, GUI::MessageBox::InputType::YesNo);
+                auto result = editor->image().export_png_to_file(save_path.value(), preserve_alpha_channel == GUI::MessageBox::ExecYes);
                 if (result.is_error())
                     GUI::MessageBox::show_error(window, String::formatted("Export to PNG failed: {}", result.error()));
             },
@@ -341,6 +343,7 @@ int main(int argc, char** argv)
                 }
                 editor->image().add_layer(layer.release_nonnull());
                 editor->layers_did_change();
+                layer_list_widget.select_top_layer();
             }
         },
         window));
@@ -348,12 +351,12 @@ int main(int argc, char** argv)
     layer_menu.add_separator();
     layer_menu.add_action(GUI::Action::create(
         "Select &Previous Layer", { 0, Key_PageUp }, [&](auto&) {
-            layer_list_widget.move_selection(1);
+            layer_list_widget.cycle_through_selection(1);
         },
         window));
     layer_menu.add_action(GUI::Action::create(
         "Select &Next Layer", { 0, Key_PageDown }, [&](auto&) {
-            layer_list_widget.move_selection(-1);
+            layer_list_widget.cycle_through_selection(-1);
         },
         window));
     layer_menu.add_action(GUI::Action::create(
@@ -398,8 +401,40 @@ int main(int argc, char** argv)
             auto active_layer = editor->active_layer();
             if (!active_layer)
                 return;
+
+            auto active_layer_index = editor->image().index_of(*active_layer);
             editor->image().remove_layer(*active_layer);
-            editor->set_active_layer(nullptr);
+
+            if (editor->image().layer_count()) {
+                auto& next_active_layer = editor->image().layer(active_layer_index > 0 ? active_layer_index - 1 : 0);
+                editor->set_active_layer(&next_active_layer);
+            } else {
+                editor->set_active_layer(nullptr);
+            }
+        },
+        window));
+
+    layer_list_widget.on_context_menu_request = [&](auto& event) {
+        layer_menu.popup(event.screen_position());
+    };
+    layer_menu.add_separator();
+    layer_menu.add_action(GUI::Action::create(
+        "&Flatten Image", { Mod_Ctrl, Key_F }, [&](auto&) {
+            auto* editor = current_image_editor();
+            if (!editor)
+                return;
+            editor->image().flatten_all_layers();
+            editor->did_complete_action();
+        },
+        window));
+
+    layer_menu.add_action(GUI::Action::create(
+        "&Merge Visible", { Mod_Ctrl, Key_M }, [&](auto&) {
+            auto* editor = current_image_editor();
+            if (!editor)
+                return;
+            editor->image().merge_visible_layers();
+            editor->did_complete_action();
         },
         window));
 
@@ -568,7 +603,7 @@ int main(int argc, char** argv)
         auto& image_editor = verify_cast<PixelPaint::ImageEditor>(widget);
         palette_widget.set_image_editor(image_editor);
         layer_list_widget.set_image(&image_editor.image());
-        layer_properties_widget.set_layer(nullptr);
+        layer_properties_widget.set_layer(image_editor.active_layer());
         // FIXME: This is badly factored. It transfers tools from the previously active editor to the new one.
         toolbox.template for_each_tool([&](auto& tool) {
             if (tool.editor()) {

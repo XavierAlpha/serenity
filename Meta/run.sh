@@ -25,6 +25,16 @@ if [ "$(uname)" = "Darwin" ] && [ "$(uname -m)" = "x86_64" ]; then
     fi
 fi
 
+SCRIPT_DIR="$(dirname "${0}")"
+
+# Prepend the toolchain qemu directory so we pick up QEMU from there
+PATH="$SCRIPT_DIR/../Toolchain/Local/qemu/bin:$PATH"
+
+# Also prepend the i686 toolchain directory because that's where most
+# people will have their QEMU binaries if they built them before the
+# directory was changed to Toolchain/Local/qemu.
+PATH="$SCRIPT_DIR/../Toolchain/Local/i686/bin:$PATH"
+
 SERENITY_RUN="${SERENITY_RUN:-$1}"
 
 if [ -z "$SERENITY_QEMU_BIN" ]; then
@@ -39,6 +49,14 @@ fi
 
 [ -z "$SERENITY_RAM_SIZE" ] && SERENITY_RAM_SIZE=512M
 
+if command -v wslpath >/dev/null; then
+    case "$SERENITY_QEMU_BIN" in
+        /mnt/c/*)
+            [ -z "$SERENITY_QEMU_CPU" ] && SERENITY_QEMU_CPU="max,vmx=off"
+            SERENITY_KERNEL_CMDLINE="$SERENITY_KERNEL_CMDLINE disable_virtio"
+    esac
+fi
+
 [ -z "$SERENITY_QEMU_CPU" ] && SERENITY_QEMU_CPU="max"
 
 [ -z "$SERENITY_DISK_IMAGE" ] && {
@@ -47,11 +65,26 @@ fi
     else
         SERENITY_DISK_IMAGE="_disk_image"
     fi
+    if command -v wslpath >/dev/null; then
+        case "$SERENITY_QEMU_BIN" in
+            /mnt/c/*)
+                SERENITY_DISK_IMAGE=$(wslpath -w "$SERENITY_DISK_IMAGE")
+                ;;
+        esac
+    fi
 }
+
+if ! command -v "$SERENITY_QEMU_BIN" >/dev/null 2>&1 ; then
+    die "Please install QEMU version 5.0 or newer or use the Toolchain/BuildQemu.sh script."
+fi
 
 SERENITY_QEMU_MIN_REQ_VERSION=5
 installed_major_version=$("$SERENITY_QEMU_BIN" -version | head -n 1 | sed -E 's/QEMU emulator version ([1-9][0-9]*|0).*/\1/')
-[ "$installed_major_version" -lt "$SERENITY_QEMU_MIN_REQ_VERSION" ] && die "Required QEMU >= 5.0! Found $($SERENITY_QEMU_BIN -version | head -n 1)"
+if [ "$installed_major_version" -lt "$SERENITY_QEMU_MIN_REQ_VERSION" ]; then
+    echo "Required QEMU >= 5.0! Found $($SERENITY_QEMU_BIN -version | head -n 1)"
+    echo "Please install a newer version of QEMU or use the Toolchain/BuildQemu.sh script."
+    die
+fi
 
 SERENITY_SCREENS="${SERENITY_SCREENS:-1}"
 if (uname -a | grep -iq WSL) || (uname -a | grep -iq microsoft); then
@@ -112,6 +145,9 @@ $SERENITY_EXTRA_QEMU_ARGS
 -smp 2
 -display $SERENITY_QEMU_DISPLAY_BACKEND
 -device $SERENITY_QEMU_DISPLAY_DEVICE
+-device secondary-vga
+-device bochs-display
+-device VGA,vgamem_mb=64
 -device piix3-ide
 -drive file=${SERENITY_DISK_IMAGE},id=disk,if=none
 -device ahci,id=ahci
@@ -196,6 +232,7 @@ elif [ "$SERENITY_RUN" = "ci" ]; then
     echo "Running QEMU in CI"
     "$SERENITY_QEMU_BIN" \
         $SERENITY_EXTRA_QEMU_ARGS \
+        $SERENITY_VIRT_TECH_ARG \
         -m $SERENITY_RAM_SIZE \
         -cpu $SERENITY_QEMU_CPU \
         -d guest_errors \

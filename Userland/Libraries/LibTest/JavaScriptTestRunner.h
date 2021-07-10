@@ -180,13 +180,13 @@ public:
 inline void TestRunnerGlobalObject::initialize_global_object()
 {
     Base::initialize_global_object();
-    define_property("global", this, JS::Attribute::Enumerable);
+    define_direct_property("global", this, JS::Attribute::Enumerable);
     for (auto& entry : s_exposed_global_functions) {
         define_native_function(
             entry.key, [fn = entry.value.function](auto& vm, auto& global_object) {
                 return fn(vm, global_object);
             },
-            entry.value.length);
+            entry.value.length, JS::default_attributes);
     }
 }
 
@@ -357,7 +357,7 @@ inline JSFileResult TestRunner::run_file_test(const String& test_path)
     // Collect logged messages
     auto& arr = interpreter->vm().get_variable("__UserOutput__", interpreter->global_object()).as_array();
     for (auto& entry : arr.indexed_properties()) {
-        auto message = entry.value_and_attributes(&interpreter->global_object()).value;
+        auto message = arr.get(entry.index());
         file_result.logged_messages.append(message.to_string_without_side_effects());
     }
 

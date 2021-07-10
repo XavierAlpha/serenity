@@ -19,14 +19,11 @@ namespace Kernel {
 extern "C" void syscall_handler(TrapFrame*) __attribute__((used));
 extern "C" void syscall_asm_entry();
 
-static void syscall_asm_entry_dummy() __attribute__((used));
-NEVER_INLINE void syscall_asm_entry_dummy()
+NEVER_INLINE NAKED void syscall_asm_entry()
 {
     // clang-format off
 #if ARCH(I386)
     asm(
-        ".globl syscall_asm_entry\n"
-        "syscall_asm_entry:\n"
         "    pushl $0x0\n"
         "    pusha\n"
         "    pushl %ds\n"
@@ -38,7 +35,7 @@ NEVER_INLINE void syscall_asm_entry_dummy()
         "    mov %ax, %ds\n"
         "    mov %ax, %es\n"
         "    mov $" __STRINGIFY(GDT_SELECTOR_PROC) ", %ax\n"
-        "    mov %ax, %fs\n"
+        "    mov %ax, %gs\n"
         "    cld\n"
         "    xor %esi, %esi\n"
         "    xor %edi, %edi\n"
@@ -53,8 +50,6 @@ NEVER_INLINE void syscall_asm_entry_dummy()
         "    jmp common_trap_exit \n");
 #elif ARCH(X86_64)
     asm(
-        ".globl syscall_asm_entry\n"
-        "syscall_asm_entry:\n"
         "    pushq $0x0\n"
         "    pushq %r15\n"
         "    pushq %r14\n"

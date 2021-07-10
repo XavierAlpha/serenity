@@ -12,8 +12,6 @@
 #include <LibJS/Console.h>
 #include <LibJS/Heap/DeferGC.h>
 #include <LibJS/Interpreter.h>
-#include <LibJS/Lexer.h>
-#include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/AggregateErrorConstructor.h>
 #include <LibJS/Runtime/AggregateErrorPrototype.h>
@@ -69,6 +67,11 @@
 #include <LibJS/Runtime/StringPrototype.h>
 #include <LibJS/Runtime/SymbolConstructor.h>
 #include <LibJS/Runtime/SymbolPrototype.h>
+#include <LibJS/Runtime/Temporal/InstantConstructor.h>
+#include <LibJS/Runtime/Temporal/InstantPrototype.h>
+#include <LibJS/Runtime/Temporal/Temporal.h>
+#include <LibJS/Runtime/Temporal/TimeZoneConstructor.h>
+#include <LibJS/Runtime/Temporal/TimeZonePrototype.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibJS/Runtime/TypedArrayConstructor.h>
 #include <LibJS/Runtime/TypedArrayPrototype.h>
@@ -111,7 +114,8 @@ void GlobalObject::initialize_global_object()
     static_cast<FunctionPrototype*>(m_function_prototype)->initialize(*this);
     static_cast<ObjectPrototype*>(m_object_prototype)->initialize(*this);
 
-    Object::set_prototype(m_object_prototype);
+    auto success = Object::internal_set_prototype_of(m_object_prototype);
+    VERIFY(success);
 
     // This must be initialized before allocating AggregateErrorPrototype, which uses ErrorPrototype as its prototype.
     m_error_prototype = heap().allocate<ErrorPrototype>(*this, *this);
@@ -125,12 +129,24 @@ void GlobalObject::initialize_global_object()
     // %GeneratorFunction.prototype.prototype% must be initialized separately as it has no
     // companion constructor
     m_generator_object_prototype = heap().allocate<GeneratorObjectPrototype>(*this, *this);
-    m_generator_object_prototype->define_property(vm.names.constructor, m_generator_function_constructor, Attribute::Configurable);
+    m_generator_object_prototype->define_direct_property(vm.names.constructor, m_generator_function_constructor, Attribute::Configurable);
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     if (!m_##snake_name##_prototype)                                                     \
         m_##snake_name##_prototype = heap().allocate<PrototypeName>(*this, *this);
     JS_ENUMERATE_BUILTIN_TYPES
+#undef __JS_ENUMERATE
+
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName) \
+    if (!m_temporal_##snake_name##_prototype)                                 \
+        m_temporal_##snake_name##_prototype = heap().allocate<Temporal::PrototypeName>(*this, *this);
+    JS_ENUMERATE_TEMPORAL_OBJECTS
+#undef __JS_ENUMERATE
+
+    // Must be allocated before `Temporal::Temporal` below.
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName) \
+    initialize_constructor(vm.names.ClassName, m_temporal_##snake_name##_constructor, m_temporal_##snake_name##_prototype);
+    JS_ENUMERATE_TEMPORAL_OBJECTS
 #undef __JS_ENUMERATE
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
@@ -147,13 +163,13 @@ void GlobalObject::initialize_global_object()
         vm.throw_exception<TypeError>(global_object, ErrorType::RestrictedFunctionPropertiesAccess);
         return Value();
     });
-    m_throw_type_error_function->prevent_extensions();
-    m_throw_type_error_function->define_property_without_transition(vm.names.length, Value(0), 0, false);
-    m_throw_type_error_function->define_property_without_transition(vm.names.name, js_string(vm, ""), 0, false);
+    m_throw_type_error_function->define_direct_property(vm.names.length, Value(0), 0);
+    m_throw_type_error_function->define_direct_property(vm.names.name, js_string(vm, ""), 0);
+    m_throw_type_error_function->internal_prevent_extensions();
 
     // 10.2.4 AddRestrictedFunctionProperties ( F, realm ), https://tc39.es/ecma262/#sec-addrestrictedfunctionproperties
-    m_function_prototype->define_accessor(vm.names.caller, throw_type_error_function(), throw_type_error_function(), Attribute::Configurable);
-    m_function_prototype->define_accessor(vm.names.arguments, throw_type_error_function(), throw_type_error_function(), Attribute::Configurable);
+    m_function_prototype->define_direct_accessor(vm.names.caller, throw_type_error_function(), throw_type_error_function(), Attribute::Configurable);
+    m_function_prototype->define_direct_accessor(vm.names.arguments, throw_type_error_function(), throw_type_error_function(), Attribute::Configurable);
 
     define_native_function(vm.names.encodeURI, encode_uri, 1, attr);
     define_native_function(vm.names.decodeURI, decode_uri, 1, attr);
@@ -162,15 +178,16 @@ void GlobalObject::initialize_global_object()
     define_native_function(vm.names.escape, escape, 1, attr);
     define_native_function(vm.names.unescape, unescape, 1, attr);
 
-    define_property(vm.names.NaN, js_nan(), 0);
-    define_property(vm.names.Infinity, js_infinity(), 0);
-    define_property(vm.names.undefined, js_undefined(), 0);
+    define_direct_property(vm.names.NaN, js_nan(), 0);
+    define_direct_property(vm.names.Infinity, js_infinity(), 0);
+    define_direct_property(vm.names.undefined, js_undefined(), 0);
 
-    define_property(vm.names.globalThis, this, attr);
-    define_property(vm.names.console, heap().allocate<ConsoleObject>(*this, *this), attr);
-    define_property(vm.names.Math, heap().allocate<MathObject>(*this, *this), attr);
-    define_property(vm.names.JSON, heap().allocate<JSONObject>(*this, *this), attr);
-    define_property(vm.names.Reflect, heap().allocate<ReflectObject>(*this, *this), attr);
+    define_direct_property(vm.names.globalThis, this, attr);
+    define_direct_property(vm.names.console, heap().allocate<ConsoleObject>(*this, *this), attr);
+    define_direct_property(vm.names.Math, heap().allocate<MathObject>(*this, *this), attr);
+    define_direct_property(vm.names.JSON, heap().allocate<JSONObject>(*this, *this), attr);
+    define_direct_property(vm.names.Reflect, heap().allocate<ReflectObject>(*this, *this), attr);
+    define_direct_property(vm.names.Temporal, heap().allocate<Temporal::Temporal>(*this, *this), attr);
 
     // This must be initialized before allocating AggregateErrorConstructor, which uses ErrorConstructor as its prototype.
     initialize_constructor(vm.names.Error, m_error_constructor, m_error_prototype);
@@ -209,7 +226,7 @@ void GlobalObject::initialize_global_object()
     // The generator constructor cannot be initialized with add_constructor as it has no global binding
     m_generator_function_constructor = heap().allocate<GeneratorFunctionConstructor>(*this, *this);
     // 27.3.3.1 GeneratorFunction.prototype.constructor, https://tc39.es/ecma262/#sec-generatorfunction.prototype.constructor
-    m_generator_function_prototype->define_property(vm.names.constructor, m_generator_function_constructor, Attribute::Configurable);
+    m_generator_function_prototype->define_direct_property(vm.names.constructor, m_generator_function_constructor, Attribute::Configurable);
 }
 
 GlobalObject::~GlobalObject()
@@ -230,8 +247,13 @@ void GlobalObject::visit_edges(Visitor& visitor)
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     visitor.visit(m_##snake_name##_constructor);                                         \
     visitor.visit(m_##snake_name##_prototype);
-    JS_ENUMERATE_NATIVE_ERRORS
     JS_ENUMERATE_BUILTIN_TYPES
+#undef __JS_ENUMERATE
+
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName) \
+    visitor.visit(m_temporal_##snake_name##_constructor);                     \
+    visitor.visit(m_temporal_##snake_name##_prototype);
+    JS_ENUMERATE_TEMPORAL_OBJECTS
 #undef __JS_ENUMERATE
 
 #define __JS_ENUMERATE(ClassName, snake_name) \

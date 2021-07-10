@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/CharacterTypes.h>
 #include <AK/MemMem.h>
 #include <AK/Memory.h>
 #include <AK/Optional.h>
@@ -13,7 +14,6 @@
 #include <AK/StringUtils.h>
 #include <AK/StringView.h>
 #include <AK/Vector.h>
-#include <ctype.h>
 
 namespace AK {
 
@@ -47,7 +47,7 @@ bool matches(const StringView& str, const StringView& mask, CaseSensitivity case
             return false;
         if (case_sensitivity == CaseSensitivity::CaseSensitive)
             return p == ch;
-        return tolower(p) == tolower(ch);
+        return to_ascii_lowercase(p) == to_ascii_lowercase(ch);
     };
     while (string_ptr < string_end && mask_ptr < mask_end) {
         auto string_start_ptr = string_ptr;
@@ -196,19 +196,12 @@ template Optional<u16> convert_to_uint_from_hex(const StringView& str, TrimWhite
 template Optional<u32> convert_to_uint_from_hex(const StringView& str, TrimWhitespace);
 template Optional<u64> convert_to_uint_from_hex(const StringView& str, TrimWhitespace);
 
-static inline char to_lowercase(char c)
-{
-    if (c >= 'A' && c <= 'Z')
-        return c | 0x20;
-    return c;
-}
-
 bool equals_ignoring_case(const StringView& a, const StringView& b)
 {
     if (a.length() != b.length())
         return false;
     for (size_t i = 0; i < a.length(); ++i) {
-        if (to_lowercase(a.characters_without_null_termination()[i]) != to_lowercase(b.characters_without_null_termination()[i]))
+        if (to_ascii_lowercase(a.characters_without_null_termination()[i]) != to_ascii_lowercase(b.characters_without_null_termination()[i]))
             return false;
     }
     return true;
@@ -231,7 +224,7 @@ bool ends_with(const StringView& str, const StringView& end, CaseSensitivity cas
 
     size_t si = str.length() - end.length();
     for (size_t ei = 0; ei < end.length(); ++si, ++ei) {
-        if (to_lowercase(str_chars[si]) != to_lowercase(end_chars[ei]))
+        if (to_ascii_lowercase(str_chars[si]) != to_ascii_lowercase(end_chars[ei]))
             return false;
     }
     return true;
@@ -256,7 +249,7 @@ bool starts_with(const StringView& str, const StringView& start, CaseSensitivity
 
     size_t si = 0;
     for (size_t starti = 0; starti < start.length(); ++si, ++starti) {
-        if (to_lowercase(str_chars[si]) != to_lowercase(start_chars[starti]))
+        if (to_ascii_lowercase(str_chars[si]) != to_ascii_lowercase(start_chars[starti]))
             return false;
     }
     return true;
@@ -273,12 +266,12 @@ bool contains(const StringView& str, const StringView& needle, CaseSensitivity c
     if (case_sensitivity == CaseSensitivity::CaseSensitive)
         return memmem(str_chars, str.length(), needle_chars, needle.length()) != nullptr;
 
-    auto needle_first = to_lowercase(needle_chars[0]);
+    auto needle_first = to_ascii_lowercase(needle_chars[0]);
     for (size_t si = 0; si < str.length(); si++) {
-        if (to_lowercase(str_chars[si]) != needle_first)
+        if (to_ascii_lowercase(str_chars[si]) != needle_first)
             continue;
         for (size_t ni = 0; si + ni < str.length(); ni++) {
-            if (to_lowercase(str_chars[si + ni]) != to_lowercase(needle_chars[ni])) {
+            if (to_ascii_lowercase(str_chars[si + ni]) != to_ascii_lowercase(needle_chars[ni])) {
                 si += ni;
                 break;
             }
@@ -291,11 +284,7 @@ bool contains(const StringView& str, const StringView& needle, CaseSensitivity c
 
 bool is_whitespace(const StringView& str)
 {
-    for (auto ch : str) {
-        if (!isspace(ch))
-            return false;
-    }
-    return true;
+    return all_of(str.begin(), str.end(), is_ascii_space);
 }
 
 StringView trim(const StringView& str, const StringView& characters, TrimMode mode)
@@ -332,11 +321,68 @@ StringView trim_whitespace(const StringView& str, TrimMode mode)
     return trim(str, " \n\t\v\f\r", mode);
 }
 
-Optional<size_t> find(const StringView& haystack, const StringView& needle)
+Optional<size_t> find(StringView const& haystack, char needle, size_t start)
 {
-    return AK::memmem_optional(
-        haystack.characters_without_null_termination(), haystack.length(),
+    if (start >= haystack.length())
+        return {};
+    for (size_t i = start; i < haystack.length(); ++i) {
+        if (haystack[i] == needle)
+            return i;
+    }
+    return {};
+}
+
+Optional<size_t> find(StringView const& haystack, StringView const& needle, size_t start)
+{
+    if (start > haystack.length())
+        return {};
+    auto index = AK::memmem_optional(
+        haystack.characters_without_null_termination() + start, haystack.length() - start,
         needle.characters_without_null_termination(), needle.length());
+    return index.has_value() ? (*index + start) : index;
+}
+
+Optional<size_t> find_last(StringView const& haystack, char needle)
+{
+    for (size_t i = haystack.length(); i > 0; --i) {
+        if (haystack[i - 1] == needle)
+            return i - 1;
+    }
+    return {};
+}
+
+Vector<size_t> find_all(StringView const& haystack, StringView const& needle)
+{
+    Vector<size_t> positions;
+    size_t current_position = 0;
+    while (current_position <= haystack.length()) {
+        auto maybe_position = AK::memmem_optional(
+            haystack.characters_without_null_termination() + current_position, haystack.length() - current_position,
+            needle.characters_without_null_termination(), needle.length());
+        if (!maybe_position.has_value())
+            break;
+        positions.append(current_position + *maybe_position);
+        current_position += *maybe_position + 1;
+    }
+    return positions;
+}
+
+Optional<size_t> find_any_of(StringView const& haystack, StringView const& needles, SearchDirection direction)
+{
+    if (haystack.is_empty() || needles.is_empty())
+        return {};
+    if (direction == SearchDirection::Forward) {
+        for (size_t i = 0; i < haystack.length(); ++i) {
+            if (needles.contains(haystack[i]))
+                return i;
+        }
+    } else if (direction == SearchDirection::Backward) {
+        for (size_t i = haystack.length(); i > 0; --i) {
+            if (needles.contains(haystack[i - 1]))
+                return i - 1;
+        }
+    }
+    return {};
 }
 
 String to_snakecase(const StringView& str)
@@ -345,12 +391,12 @@ String to_snakecase(const StringView& str)
         if (i == 0)
             return false;
         auto previous_ch = str[i - 1];
-        if (islower(previous_ch) && isupper(current_char))
+        if (is_ascii_lower_alpha(previous_ch) && is_ascii_upper_alpha(current_char))
             return true;
         if (i >= str.length() - 1)
             return false;
         auto next_ch = str[i + 1];
-        if (isupper(current_char) && islower(next_ch))
+        if (is_ascii_upper_alpha(current_char) && is_ascii_lower_alpha(next_ch))
             return true;
         return false;
     };
@@ -360,7 +406,7 @@ String to_snakecase(const StringView& str)
         auto ch = str[i];
         if (should_insert_underscore(i, ch))
             builder.append('_');
-        builder.append(tolower(ch));
+        builder.append_as_lowercase(ch);
     }
     return builder.to_string();
 }

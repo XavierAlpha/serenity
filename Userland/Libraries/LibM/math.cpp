@@ -14,6 +14,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wdouble-promotion"
+#endif
+
 template<size_t>
 constexpr double e_to_power();
 template<>
@@ -320,7 +325,7 @@ static FloatT internal_gamma(FloatT x) NOEXCEPT
     }
 
     // Stirling approximation
-    return sqrtl(2.0 * M_PI / static_cast<long double>(x)) * powl(static_cast<long double>(x) / M_E, static_cast<long double>(x));
+    return sqrtl(2.0 * M_PIl / static_cast<long double>(x)) * powl(static_cast<long double>(x) / M_El, static_cast<long double>(x));
 }
 
 extern "C" {
@@ -357,23 +362,40 @@ long double truncl(long double x) NOEXCEPT
 
 long double cosl(long double angle) NOEXCEPT
 {
-    return sinl(angle + M_PI_2);
+    long double ret = 0.0;
+    asm(
+        "fcos"
+        : "=t"(ret)
+        : "0"(angle));
+    return ret;
 }
 
 double cos(double angle) NOEXCEPT
 {
-    return sin(angle + M_PI_2);
+    double ret = 0.0;
+    asm(
+        "fcos"
+        : "=t"(ret)
+        : "0"(angle));
+
+    return ret;
 }
 
 float cosf(float angle) NOEXCEPT
 {
-    return sinf(angle + static_cast<float>(M_PI_2));
+    float ret = 0.0;
+    asm(
+        "fcos"
+        : "=t"(ret)
+        : "0"(angle));
+
+    return ret;
 }
 
 long double sinl(long double angle) NOEXCEPT
 {
     long double ret = 0.0;
-    __asm__(
+    asm(
         "fsin"
         : "=t"(ret)
         : "0"(angle));
@@ -388,7 +410,7 @@ long double sinl(long double angle) NOEXCEPT
 double sin(double angle) NOEXCEPT
 {
     double ret = 0.0;
-    __asm__(
+    asm(
         "fsin"
         : "=t"(ret)
         : "0"(angle));
@@ -399,7 +421,7 @@ double sin(double angle) NOEXCEPT
 float sinf(float angle) NOEXCEPT
 {
     float ret = 0.0f;
-    __asm__(
+    asm(
         "fsin"
         : "=t"(ret)
         : "0"(angle));
@@ -426,6 +448,10 @@ long double powl(long double x, long double y) NOEXCEPT
             result = 1.0l / result;
         return result;
     }
+    if (x < 0) {
+        return 1.l / exp2l(y * log2l(-x));
+    }
+
     return exp2l(y * log2l(x));
 }
 
@@ -708,50 +734,61 @@ float coshf(float x) NOEXCEPT
 
 long double atan2l(long double y, long double x) NOEXCEPT
 {
-    if (x == 0) {
-        if (y > 0)
-            return M_PI_2;
-        if (y < 0)
-            return -M_PI_2;
-        return 0;
-    }
-
     long double result = 0; //atanl(y / x);
-    __asm__("fpatan"
-            : "=t"(result)
-            : "0"(x), "u"(y)
-            : "st(1)");
+    asm("fpatan"
+        : "=t"(result)
+        : "0"(x), "u"(y)
+        : "st(1)");
     return result;
 }
 
 double atan2(double y, double x) NOEXCEPT
 {
-    return (double)atan2l(y, x);
+    double result = 0; //atanl(y / x);
+    asm("fpatan"
+        : "=t"(result)
+        : "0"(x), "u"(y)
+        : "st(1)");
+    return result;
 }
-
 float atan2f(float y, float x) NOEXCEPT
 {
-    return (float)atan2l(y, x);
+    float result = 0; //atanl(y / x);
+    asm("fpatan"
+        : "=t"(result)
+        : "0"(x), "u"(y)
+        : "st(1)");
+    return result;
 }
 
 long double atanl(long double x) NOEXCEPT
 {
-    if (x < 0)
-        return -atanl(-x);
-    if (x > 1)
-        return M_PI_2 - atanl(1 / x);
-    long double squared = x * x;
-    return x / (1 + 1 * 1 * squared / (3 + 2 * 2 * squared / (5 + 3 * 3 * squared / (7 + 4 * 4 * squared / (9 + 5 * 5 * squared / (11 + 6 * 6 * squared / (13 + 7 * 7 * squared)))))));
+    asm(
+        "fld1\n"
+        "fpatan\n"
+        : "=t"(x)
+        : "0"(x));
+    return x;
 }
 
 double atan(double x) NOEXCEPT
 {
-    return (double)atanl(x);
+    asm(
+        "fld1\n"
+        "fpatan\n"
+        : "=t"(x)
+        : "0"(x));
+    return x;
 }
 
 float atanf(float x) NOEXCEPT
 {
-    return (float)atanl(x);
+    asm(
+        "fld1\n"
+        "fpatan\n"
+        : "=t"(x)
+        : "0"(x));
+    return x;
 }
 
 long double asinl(long double x) NOEXCEPT
@@ -1429,3 +1466,7 @@ float nearbyintf(float value) NOEXCEPT
     return internal_to_integer(value, RoundingMode { fegetround() });
 }
 }
+
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#endif

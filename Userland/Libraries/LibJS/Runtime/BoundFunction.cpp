@@ -22,7 +22,7 @@ void BoundFunction::initialize(GlobalObject& global_object)
 {
     auto& vm = this->vm();
     Base::initialize(global_object);
-    define_property(vm.names.length, Value(m_length), Attribute::Configurable);
+    define_direct_property(vm.names.length, Value(m_length), Attribute::Configurable);
 }
 
 BoundFunction::~BoundFunction()
@@ -37,7 +37,7 @@ Value BoundFunction::call()
 Value BoundFunction::construct(FunctionObject& new_target)
 {
     if (auto this_value = vm().this_value(global_object()); m_constructor_prototype && this_value.is_object()) {
-        this_value.as_object().set_prototype(m_constructor_prototype);
+        this_value.as_object().internal_set_prototype_of(m_constructor_prototype);
         if (vm().exception())
             return {};
     }

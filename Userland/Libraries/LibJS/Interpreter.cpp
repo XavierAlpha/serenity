@@ -84,6 +84,9 @@ const GlobalObject& Interpreter::global_object() const
 void Interpreter::enter_scope(const ScopeNode& scope_node, ScopeType scope_type, GlobalObject& global_object)
 {
     ScopeGuard guard([&] {
+        for (auto& declaration : scope_node.hoisted_functions()) {
+            lexical_environment()->put_into_environment(declaration.name(), { js_undefined(), DeclarationKind::Var });
+        }
         for (auto& declaration : scope_node.functions()) {
             auto* function = OrdinaryFunctionObject::create(global_object, declaration.name(), declaration.body(), declaration.parameters(), declaration.function_length(), lexical_environment(), declaration.kind(), declaration.is_strict_mode());
             vm().set_variable(declaration.name(), function, global_object);
@@ -107,11 +110,11 @@ void Interpreter::enter_scope(const ScopeNode& scope_node, ScopeType scope_type,
             if (is_program_node && declaration.declaration_kind() == DeclarationKind::Var) {
                 declarator.target().visit(
                     [&](const NonnullRefPtr<Identifier>& id) {
-                        global_object.put(id->string(), js_undefined());
+                        global_object.define_direct_property(id->string(), js_undefined(), JS::Attribute::Writable | JS::Attribute::Enumerable);
                     },
                     [&](const NonnullRefPtr<BindingPattern>& binding) {
                         binding->for_each_bound_name([&](const auto& name) {
-                            global_object.put(name, js_undefined());
+                            global_object.define_direct_property(name, js_undefined(), JS::Attribute::Writable | JS::Attribute::Enumerable);
                         });
                     });
                 if (exception())

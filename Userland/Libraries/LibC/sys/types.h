@@ -75,8 +75,8 @@ typedef struct __pthread_mutexattr_t {
 } pthread_mutexattr_t;
 
 typedef struct __pthread_cond_t {
+    pthread_mutex_t* mutex;
     uint32_t value;
-    uint32_t previous;
     int clockid; // clockid_t
 } pthread_cond_t;
 
@@ -89,8 +89,8 @@ typedef struct __pthread_condattr_t {
     int clockid; // clockid_t
 } pthread_condattr_t;
 
-inline dev_t makedev(unsigned int major, unsigned int minor) { return (minor & 0xffu) | (major << 8u) | ((minor & ~0xffu) << 12u); }
-inline unsigned int major(dev_t dev) { return (dev & 0xfff00u) >> 8u; }
-inline unsigned int minor(dev_t dev) { return (dev & 0xffu) | ((dev >> 12u) & 0xfff00u); }
+static inline dev_t makedev(unsigned int major, unsigned int minor) { return (minor & 0xffu) | (major << 8u) | ((minor & ~0xffu) << 12u); }
+static inline unsigned int major(dev_t dev) { return (dev & 0xfff00u) >> 8u; }
+static inline unsigned int minor(dev_t dev) { return (dev & 0xffu) | ((dev >> 12u) & 0xfff00u); }
 
 __END_DECLS

@@ -42,8 +42,8 @@ Sheet::Sheet(Workbook& workbook)
     JS::DeferGC defer_gc(m_workbook.interpreter().heap());
     m_global_object = m_workbook.interpreter().heap().allocate_without_global_object<SheetGlobalObject>(*this);
     global_object().initialize_global_object();
-    global_object().put("workbook", m_workbook.workbook_object());
-    global_object().put("thisSheet", &global_object()); // Self-reference is unfortunate, but required.
+    global_object().define_direct_property("workbook", m_workbook.workbook_object(), JS::default_attributes);
+    global_object().define_direct_property("thisSheet", &global_object(), JS::default_attributes); // Self-reference is unfortunate, but required.
 
     // Sadly, these have to be evaluated once per sheet.
     auto file_or_error = Core::File::open("/res/js/Spreadsheet/runtime.js", Core::OpenMode::ReadOnly);
@@ -91,7 +91,7 @@ static size_t convert_from_string(StringView str, unsigned base = 26, StringView
 
     size_t value = 0;
     for (size_t i = str.length(); i > 0; --i) {
-        auto digit_value = map.find_first_of(str[i - 1]).value_or(0);
+        auto digit_value = map.find(str[i - 1]).value_or(0);
         // NOTE: Refer to the note in `String::bijective_base_from()'.
         if (i == str.length() && str.length() > 1)
             ++digit_value;

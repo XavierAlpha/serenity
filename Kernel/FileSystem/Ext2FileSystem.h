@@ -40,7 +40,7 @@ private:
     // ^Inode
     virtual KResultOr<size_t> read_bytes(off_t, size_t, UserOrKernelBuffer& buffer, FileDescription*) const override;
     virtual InodeMetadata metadata() const override;
-    virtual KResult traverse_as_directory(Function<bool(const FS::DirectoryEntryView&)>) const override;
+    virtual KResult traverse_as_directory(Function<bool(FileSystem::DirectoryEntryView const&)>) const override;
     virtual RefPtr<Inode> lookup(StringView name) override;
     virtual void flush_metadata() override;
     virtual KResultOr<size_t> write_bytes(off_t, size_t, const UserOrKernelBuffer& data, FileDescription*) override;
@@ -61,27 +61,27 @@ private:
     KResult write_directory(Vector<Ext2FSDirectoryEntry>&);
     KResult populate_lookup_cache() const;
     KResult resize(u64);
-    KResult write_indirect_block(BlockBasedFS::BlockIndex, Span<BlockBasedFS::BlockIndex>);
-    KResult grow_doubly_indirect_block(BlockBasedFS::BlockIndex, size_t, Span<BlockBasedFS::BlockIndex>, Vector<BlockBasedFS::BlockIndex>&, unsigned&);
-    KResult shrink_doubly_indirect_block(BlockBasedFS::BlockIndex, size_t, size_t, unsigned&);
-    KResult grow_triply_indirect_block(BlockBasedFS::BlockIndex, size_t, Span<BlockBasedFS::BlockIndex>, Vector<BlockBasedFS::BlockIndex>&, unsigned&);
-    KResult shrink_triply_indirect_block(BlockBasedFS::BlockIndex, size_t, size_t, unsigned&);
+    KResult write_indirect_block(BlockBasedFileSystem::BlockIndex, Span<BlockBasedFileSystem::BlockIndex>);
+    KResult grow_doubly_indirect_block(BlockBasedFileSystem::BlockIndex, size_t, Span<BlockBasedFileSystem::BlockIndex>, Vector<BlockBasedFileSystem::BlockIndex>&, unsigned&);
+    KResult shrink_doubly_indirect_block(BlockBasedFileSystem::BlockIndex, size_t, size_t, unsigned&);
+    KResult grow_triply_indirect_block(BlockBasedFileSystem::BlockIndex, size_t, Span<BlockBasedFileSystem::BlockIndex>, Vector<BlockBasedFileSystem::BlockIndex>&, unsigned&);
+    KResult shrink_triply_indirect_block(BlockBasedFileSystem::BlockIndex, size_t, size_t, unsigned&);
     KResult flush_block_list();
-    Vector<BlockBasedFS::BlockIndex> compute_block_list() const;
-    Vector<BlockBasedFS::BlockIndex> compute_block_list_with_meta_blocks() const;
-    Vector<BlockBasedFS::BlockIndex> compute_block_list_impl(bool include_block_list_blocks) const;
-    Vector<BlockBasedFS::BlockIndex> compute_block_list_impl_internal(const ext2_inode& e2inode, bool include_block_list_blocks) const;
+    Vector<BlockBasedFileSystem::BlockIndex> compute_block_list() const;
+    Vector<BlockBasedFileSystem::BlockIndex> compute_block_list_with_meta_blocks() const;
+    Vector<BlockBasedFileSystem::BlockIndex> compute_block_list_impl(bool include_block_list_blocks) const;
+    Vector<BlockBasedFileSystem::BlockIndex> compute_block_list_impl_internal(const ext2_inode& e2inode, bool include_block_list_blocks) const;
 
     Ext2FS& fs();
     const Ext2FS& fs() const;
     Ext2FSInode(Ext2FS&, InodeIndex);
 
-    mutable Vector<BlockBasedFS::BlockIndex> m_block_list;
+    mutable Vector<BlockBasedFileSystem::BlockIndex> m_block_list;
     mutable HashMap<String, InodeIndex> m_lookup_cache;
     ext2_inode m_raw_inode;
 };
 
-class Ext2FS final : public BlockBasedFS {
+class Ext2FS final : public BlockBasedFileSystem {
     friend class Ext2FSInode;
 
 public:
@@ -118,10 +118,10 @@ private:
     ext2_group_desc* block_group_descriptors() { return (ext2_group_desc*)m_cached_group_descriptor_table->data(); }
     const ext2_group_desc* block_group_descriptors() const { return (const ext2_group_desc*)m_cached_group_descriptor_table->data(); }
     void flush_block_group_descriptor_table();
-    unsigned inodes_per_block() const;
-    unsigned inodes_per_group() const;
-    unsigned blocks_per_group() const;
-    unsigned inode_size() const;
+    u64 inodes_per_block() const;
+    u64 inodes_per_group() const;
+    u64 blocks_per_group() const;
+    u64 inode_size() const;
 
     bool write_ext2_inode(InodeIndex, const ext2_inode&);
     bool find_block_containing_inode(InodeIndex, BlockIndex& block_index, unsigned& offset) const;
@@ -158,7 +158,7 @@ private:
 
     BlockListShape compute_block_list_shape(unsigned blocks) const;
 
-    unsigned m_block_group_count { 0 };
+    u64 m_block_group_count { 0 };
 
     mutable ext2_super_block m_super_block;
     mutable OwnPtr<KBuffer> m_cached_group_descriptor_table;

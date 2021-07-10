@@ -160,7 +160,7 @@ void VM::set_variable(const FlyString& name, Value value, GlobalObject& global_o
         return;
     }
 
-    global_object.put(name, value);
+    global_object.set(name, value, true);
 }
 
 bool VM::delete_variable(FlyString const& name)
@@ -218,7 +218,7 @@ void VM::assign(const NonnullRefPtr<BindingPattern>& target, Value value, Global
             if (entry.is_rest) {
                 VERIFY(i == binding.entries.size() - 1);
 
-                auto* array = Array::create(global_object);
+                auto* array = Array::create(global_object, 0);
                 for (;;) {
                     auto next_object = iterator_next(*iterator);
                     if (!next_object)
@@ -228,7 +228,7 @@ void VM::assign(const NonnullRefPtr<BindingPattern>& target, Value value, Global
                     if (exception())
                         return;
 
-                    if (!done_property.is_empty() && done_property.to_boolean())
+                    if (done_property.to_boolean())
                         break;
 
                     auto next_value = next_object->get(names.value);
@@ -247,7 +247,7 @@ void VM::assign(const NonnullRefPtr<BindingPattern>& target, Value value, Global
                 if (exception())
                     return;
 
-                if (!done_property.is_empty() && done_property.to_boolean()) {
+                if (done_property.to_boolean()) {
                     iterator = nullptr;
                     value = js_undefined();
                 } else {
@@ -294,11 +294,11 @@ void VM::assign(const NonnullRefPtr<BindingPattern>& target, Value value, Global
 
                 auto* rest_object = Object::create(global_object, global_object.object_prototype());
                 for (auto& object_property : object->shape().property_table()) {
-                    if (!object_property.value.attributes.has_enumerable())
+                    if (!object_property.value.attributes.is_enumerable())
                         continue;
                     if (seen_names.contains(object_property.key.to_display_string()))
                         continue;
-                    rest_object->put(object_property.key, object->get(object_property.key));
+                    rest_object->set(object_property.key, object->get(object_property.key), true);
                     if (exception())
                         return;
                 }
@@ -384,25 +384,56 @@ Value VM::get_variable(const FlyString& name, GlobalObject& global_object)
                 return {};
             if (possible_match.has_value())
                 return possible_match.value().value;
+            if (environment->has_binding(name))
+                return environment->get_binding_value(global_object, name, false);
         }
     }
-    auto value = global_object.get(name);
-    if (m_underscore_is_last_value && name == "_" && value.is_empty())
-        return m_last_value;
-    return value;
+
+    if (!global_object.storage_has(name)) {
+        if (m_underscore_is_last_value && name == "_")
+            return m_last_value;
+        return {};
+    }
+    return global_object.get(name);
+}
+
+// 9.1.2.1 GetIdentifierReference ( env, name, strict ), https://tc39.es/ecma262/#sec-getidentifierreference
+Reference VM::get_identifier_reference(Environment* environment, FlyString const& name, bool strict)
+{
+    // 1. If env is the value null, then
+    if (!environment) {
+        // a. Return the Reference Record { [[Base]]: unresolvable, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
+        return Reference { Reference::BaseType::Unresolvable, name, strict };
+    }
+
+    // FIXME: The remainder of this function is non-conforming.
+
+    auto& global_object = environment->global_object();
+    for (; environment && environment->outer_environment(); environment = environment->outer_environment()) {
+        auto possible_match = environment->get_from_environment(name);
+        if (possible_match.has_value())
+            return Reference { *environment, name, strict };
+    }
+    return Reference { global_object.environment(), name, strict };
 }
 
 // 9.4.2 ResolveBinding ( name [ , env ] ), https://tc39.es/ecma262/#sec-resolvebinding
-Reference VM::resolve_binding(GlobalObject& global_object, FlyString const& name, Environment*)
+Reference VM::resolve_binding(FlyString const& name, Environment* environment)
 {
-    // FIXME: This implementation of ResolveBinding is non-conforming.
-
-    for (auto* environment = lexical_environment(); environment && environment->outer_environment(); environment = environment->outer_environment()) {
-        auto possible_match = environment->get_from_environment(name);
-        if (possible_match.has_value())
-            return Reference { *environment, name, in_strict_mode() };
+    // 1. If env is not present or if env is undefined, then
+    if (!environment) {
+        // a. Set env to the running execution context's LexicalEnvironment.
+        environment = running_execution_context().lexical_environment;
     }
-    return Reference { global_object.environment(), name, in_strict_mode() };
+
+    // 2. Assert: env is an Environment Record.
+    VERIFY(environment);
+
+    // 3. If the code matching the syntactic production that is being evaluated is contained in strict mode code, let strict be true; else let strict be false.
+    bool strict = in_strict_mode();
+
+    // 4. Return ? GetIdentifierReference(env, name, strict).
+    return get_identifier_reference(environment, name, strict);
 }
 
 Value VM::construct(FunctionObject& function, FunctionObject& new_target, Optional<MarkedValueList> arguments)
@@ -417,29 +448,26 @@ Value VM::construct(FunctionObject& function, FunctionObject& new_target, Option
     }
 
     ExecutionContext callee_context;
-    callee_context.function = &function;
-    if (auto* interpreter = interpreter_if_exists())
-        callee_context.current_node = interpreter->current_node();
-    callee_context.is_strict_mode = function.is_strict_mode();
-
-    push_execution_context(callee_context, global_object);
+    prepare_for_ordinary_call(function, callee_context, &new_target);
     if (exception())
         return {};
+
     ArmedScopeGuard pop_guard = [&] {
         pop_execution_context();
     };
 
-    callee_context.function_name = function.name();
+    if (auto* interpreter = interpreter_if_exists())
+        callee_context.current_node = interpreter->current_node();
+
     callee_context.arguments = function.bound_arguments();
     if (arguments.has_value())
         callee_context.arguments.extend(arguments.value().values());
-    auto* environment = function.create_environment(function);
-    callee_context.lexical_environment = environment;
-    callee_context.variable_environment = environment;
-    if (environment) {
-        environment->set_new_target(&new_target);
+
+    if (auto* environment = callee_context.lexical_environment) {
+        auto& function_environment = verify_cast<FunctionEnvironment>(*environment);
+        function_environment.set_new_target(&new_target);
         if (!this_argument.is_empty()) {
-            environment->bind_this_value(global_object, this_argument);
+            function_environment.bind_this_value(global_object, this_argument);
             if (exception())
                 return {};
         }
@@ -449,23 +477,19 @@ Value VM::construct(FunctionObject& function, FunctionObject& new_target, Option
     callee_context.this_value = this_argument;
     auto result = function.construct(new_target);
 
-    Value this_value = this_argument;
-    if (environment)
-        this_value = environment->get_this_binding(global_object);
     pop_execution_context();
     pop_guard.disarm();
 
     // If we are constructing an instance of a derived class,
     // set the prototype on objects created by constructors that return an object (i.e. NativeFunction subclasses).
     if (function.constructor_kind() == FunctionObject::ConstructorKind::Base && new_target.constructor_kind() == FunctionObject::ConstructorKind::Derived && result.is_object()) {
-        if (environment) {
-            verify_cast<FunctionEnvironment>(lexical_environment())->replace_this_binding(result);
-        }
+        if (auto* environment = callee_context.lexical_environment)
+            verify_cast<FunctionEnvironment>(environment)->replace_this_binding(result);
         auto prototype = new_target.get(names.prototype);
         if (exception())
             return {};
         if (prototype.is_object()) {
-            result.as_object().set_prototype(&prototype.as_object());
+            result.as_object().internal_set_prototype_of(&prototype.as_object());
             if (exception())
                 return {};
         }
@@ -478,7 +502,9 @@ Value VM::construct(FunctionObject& function, FunctionObject& new_target, Option
     if (result.is_object())
         return result;
 
-    return this_value;
+    if (auto* environment = callee_context.lexical_environment)
+        return environment->get_this_binding(global_object);
+    return this_argument;
 }
 
 void VM::throw_exception(Exception& exception)
@@ -511,39 +537,90 @@ Value VM::get_new_target()
     return verify_cast<FunctionEnvironment>(env).new_target();
 }
 
+// 10.2.1.1 PrepareForOrdinaryCall ( F, newTarget ), https://tc39.es/ecma262/#sec-prepareforordinarycall
+void VM::prepare_for_ordinary_call(FunctionObject& function, ExecutionContext& callee_context, Value new_target)
+{
+    // NOTE: This is a LibJS specific hack for NativeFunction to inherit the strictness of its caller.
+    // FIXME: I feel like we should be able to get rid of this.
+    if (is<NativeFunction>(function))
+        callee_context.is_strict_mode = in_strict_mode();
+    else
+        callee_context.is_strict_mode = function.is_strict_mode();
+
+    // 1. Assert: Type(newTarget) is Undefined or Object.
+    VERIFY(new_target.is_undefined() || new_target.is_object());
+
+    // 2. Let callerContext be the running execution context.
+    // 3. Let calleeContext be a new ECMAScript code execution context.
+
+    // NOTE: In the specification, PrepareForOrdinaryCall "returns" a new callee execution context.
+    // To avoid heap allocations, we put our ExecutionContext objects on the C++ stack instead.
+    // Whoever calls us should put an ExecutionContext on their stack and pass that as the `callee_context`.
+
+    // 4. Set the Function of calleeContext to F.
+    callee_context.function = &function;
+    callee_context.function_name = function.name();
+
+    // 5. Let calleeRealm be F.[[Realm]].
+    // 6. Set the Realm of calleeContext to calleeRealm.
+    // 7. Set the ScriptOrModule of calleeContext to F.[[ScriptOrModule]].
+    // FIXME: Our execution context struct currently does not track these items.
+
+    // 8. Let localEnv be NewFunctionEnvironment(F, newTarget).
+    // FIXME: This should call NewFunctionEnvironment instead of the ad-hoc FunctionObject::create_environment()
+    auto* local_environment = function.create_environment(function);
+
+    // 9. Set the LexicalEnvironment of calleeContext to localEnv.
+    callee_context.lexical_environment = local_environment;
+
+    // 10. Set the VariableEnvironment of calleeContext to localEnv.
+    callee_context.variable_environment = local_environment;
+
+    // 11. Set the PrivateEnvironment of calleeContext to F.[[PrivateEnvironment]].
+    // FIXME: We currently don't support private environments.
+
+    // 12. If callerContext is not already suspended, suspend callerContext.
+    // FIXME: We don't have this concept yet.
+
+    // 13. Push calleeContext onto the execution context stack; calleeContext is now the running execution context.
+    push_execution_context(callee_context, function.global_object());
+
+    // 14. NOTE: Any exception objects produced after this point are associated with calleeRealm.
+    // 15. Return calleeContext. (See NOTE above about how contexts are allocated on the C++ stack.)
+}
+
 Value VM::call_internal(FunctionObject& function, Value this_value, Optional<MarkedValueList> arguments)
 {
     VERIFY(!exception());
     VERIFY(!this_value.is_empty());
 
     ExecutionContext callee_context;
-    callee_context.function = &function;
+    prepare_for_ordinary_call(function, callee_context, js_undefined());
+    if (exception())
+        return {};
+
+    ScopeGuard pop_guard = [&] {
+        pop_execution_context();
+    };
+
     if (auto* interpreter = interpreter_if_exists())
         callee_context.current_node = interpreter->current_node();
-    callee_context.is_strict_mode = function.is_strict_mode();
-    callee_context.function_name = function.name();
+
     callee_context.this_value = function.bound_this().value_or(this_value);
     callee_context.arguments = function.bound_arguments();
     if (arguments.has_value())
         callee_context.arguments.extend(arguments.value().values());
-    auto* environment = function.create_environment(function);
-    callee_context.lexical_environment = environment;
-    callee_context.variable_environment = environment;
 
-    if (environment) {
-        VERIFY(environment->this_binding_status() == FunctionEnvironment::ThisBindingStatus::Uninitialized);
-        environment->bind_this_value(function.global_object(), callee_context.this_value);
+    if (auto* environment = callee_context.lexical_environment) {
+        auto& function_environment = verify_cast<FunctionEnvironment>(*environment);
+        VERIFY(function_environment.this_binding_status() == FunctionEnvironment::ThisBindingStatus::Uninitialized);
+        function_environment.bind_this_value(function.global_object(), callee_context.this_value);
     }
 
     if (exception())
         return {};
 
-    push_execution_context(callee_context, function.global_object());
-    if (exception())
-        return {};
-    auto result = function.call();
-    pop_execution_context();
-    return result;
+    return function.call();
 }
 
 bool VM::in_strict_mode() const

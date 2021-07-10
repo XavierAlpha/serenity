@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2020, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/String.h>
-#include <LibCrypto/BigInt/SignedBigInteger.h>
+#include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/BigIntConstructor.h>
 #include <LibJS/Runtime/BigIntObject.h>
 #include <LibJS/Runtime/Error.h>
@@ -25,14 +25,14 @@ void BigIntConstructor::initialize(GlobalObject& global_object)
     NativeFunction::initialize(global_object);
 
     // 21.2.2.3 BigInt.prototype, https://tc39.es/ecma262/#sec-bigint.prototype
-    define_property(vm.names.prototype, global_object.bigint_prototype(), 0);
-
-    define_property(vm.names.length, Value(1), Attribute::Configurable);
+    define_direct_property(vm.names.prototype, global_object.bigint_prototype(), 0);
 
     // TODO: Implement these functions below and uncomment this.
     // u8 attr = Attribute::Writable | Attribute::Configurable;
     // define_native_function(vm.names.asIntN, as_int_n, 2, attr);
     // define_native_function(vm.names.asUintN, as_uint_n, 2, attr);
+
+    define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 }
 
 BigIntConstructor::~BigIntConstructor()
@@ -42,20 +42,22 @@ BigIntConstructor::~BigIntConstructor()
 // 21.2.1.1 BigInt ( value ), https://tc39.es/ecma262/#sec-bigint-constructor-number-value
 Value BigIntConstructor::call()
 {
-    auto primitive = vm().argument(0).to_primitive(global_object(), Value::PreferredType::Number);
-    if (vm().exception())
+    auto& vm = this->vm();
+    auto& global_object = this->global_object();
+
+    auto value = vm.argument(0);
+
+    // 2. Let prim be ? ToPrimitive(value, number).
+    auto primitive = value.to_primitive(global_object, Value::PreferredType::Number);
+    if (vm.exception())
         return {};
-    if (primitive.is_number()) {
-        if (!primitive.is_integral_number()) {
-            vm().throw_exception<RangeError>(global_object(), ErrorType::BigIntIntArgument);
-            return {};
-        }
-        return js_bigint(heap(), Crypto::SignedBigInteger { primitive.as_i32() });
-    }
-    auto* bigint = vm().argument(0).to_bigint(global_object());
-    if (vm().exception())
-        return {};
-    return bigint;
+
+    // 3. If Type(prim) is Number, return ? NumberToBigInt(prim).
+    if (primitive.is_number())
+        return number_to_bigint(global_object, primitive);
+
+    // 4. Otherwise, return ? ToBigInt(value).
+    return value.to_bigint(global_object);
 }
 
 // 21.2.1.1 BigInt ( value ), https://tc39.es/ecma262/#sec-bigint-constructor-number-value

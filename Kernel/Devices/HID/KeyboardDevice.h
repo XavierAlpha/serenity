@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, Liav A. <liavalb@hotmail.co.il>
+ * Copyright (c) 2021, Edwin Hoksberg <mail@edwinhoksberg.nl>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -30,10 +31,13 @@ public:
     virtual bool can_write(const FileDescription&, size_t) const override { return true; }
 
     // ^HIDDevice
-    virtual Type instrument_type() const { return Type::Keyboard; }
+    virtual Type instrument_type() const override { return Type::Keyboard; }
 
     // ^Device
     virtual mode_t required_mode() const override { return 0440; }
+
+    // ^File
+    virtual int ioctl(FileDescription&, unsigned request, FlatPtr arg) override;
 
     virtual String device_name() const override { return String::formatted("keyboard{}", minor()); }
 
@@ -50,7 +54,7 @@ protected:
     mutable SpinLock<u8> m_queue_lock;
     CircularQueue<Event, 16> m_queue;
     // ^CharacterDevice
-    virtual const char* class_name() const override { return "KeyboardDevice"; }
+    virtual StringView class_name() const override { return "KeyboardDevice"; }
 
     u8 m_modifiers { 0 };
     bool m_caps_lock_to_ctrl_pressed { false };

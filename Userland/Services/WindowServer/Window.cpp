@@ -67,6 +67,13 @@ static Gfx::Bitmap& close_icon()
     return *s_icon;
 }
 
+static Gfx::Bitmap& pin_icon()
+{
+    static Gfx::Bitmap* s_icon;
+    if (!s_icon)
+        s_icon = Gfx::Bitmap::load_from_file("/res/icons/16x16/window-pin.png").leak_ref();
+    return *s_icon;
+}
 Window::Window(Core::Object& parent, WindowType type)
     : Core::Object(&parent)
     , m_type(type)
@@ -141,7 +148,8 @@ void Window::set_rect(const Gfx::IntRect& rect)
     }
 
     invalidate(true, old_rect.size() != rect.size());
-    m_frame.window_rect_changed(old_rect, rect); // recomputes occlusions
+    m_frame.window_rect_changed(old_rect, rect);
+    invalidate_last_rendered_screen_rects();
 }
 
 void Window::set_rect_without_repaint(const Gfx::IntRect& rect)
@@ -161,7 +169,8 @@ void Window::set_rect_without_repaint(const Gfx::IntRect& rect)
     }
 
     invalidate(true, old_rect.size() != rect.size());
-    m_frame.window_rect_changed(old_rect, rect); // recomputes occlusions
+    m_frame.window_rect_changed(old_rect, rect);
+    invalidate_last_rendered_screen_rects();
 }
 
 bool Window::apply_minimum_size(Gfx::IntRect& rect)
@@ -267,28 +276,52 @@ void Window::update_window_menu_items()
     if (!m_window_menu)
         return;
 
-    m_window_menu_minimize_item->set_text(m_minimized ? "&Unminimize" : "Mi&nimize");
+    m_window_menu_minimize_item->set_text(m_minimized_state != WindowMinimizedState::None ? "&Unminimize" : "Mi&nimize");
     m_window_menu_minimize_item->set_enabled(m_minimizable);
 
     m_window_menu_maximize_item->set_text(m_maximized ? "&Restore" : "Ma&ximize");
     m_window_menu_maximize_item->set_enabled(m_resizable);
 
-    m_window_menu_move_item->set_enabled(!m_minimized && !m_maximized && !m_fullscreen);
+    m_window_menu_move_item->set_enabled(m_minimized_state == WindowMinimizedState::None && !m_maximized && !m_fullscreen);
+
+    if (m_window_menu_pin_item)
+        m_window_menu_pin_item->set_text(m_pinned ? "Un-&Pin Window" : "&Pin Window");
 }
 
 void Window::set_minimized(bool minimized)
 {
-    if (m_minimized == minimized)
+    if ((m_minimized_state != WindowMinimizedState::None) == minimized)
         return;
     if (minimized && !m_minimizable)
         return;
-    m_minimized = minimized;
+    m_minimized_state = minimized ? WindowMinimizedState::Minimized : WindowMinimizedState::None;
+    update_window_menu_items();
+
+    if (!blocking_modal_window())
+        start_minimize_animation();
+    if (!minimized)
+        request_update({ {}, size() });
+
+    // Since a minimized window won't be visible we need to invalidate the last rendered
+    // rectangles before the next occlusion calculation
+    invalidate_last_rendered_screen_rects_now();
+
+    WindowManager::the().notify_minimization_state_changed(*this);
+}
+
+void Window::set_hidden(bool hidden)
+{
+    if ((m_minimized_state != WindowMinimizedState::None) == hidden)
+        return;
+    if (hidden && !m_minimizable)
+        return;
+    m_minimized_state = hidden ? WindowMinimizedState::Hidden : WindowMinimizedState::None;
     update_window_menu_items();
     Compositor::the().invalidate_occlusions();
     Compositor::the().invalidate_screen(frame().render_rect());
     if (!blocking_modal_window())
         start_minimize_animation();
-    if (!minimized)
+    if (!hidden)
         request_update({ {}, size() });
     WindowManager::the().notify_minimization_state_changed(*this);
 }
@@ -325,6 +358,8 @@ static Gfx::IntRect interpolate_rect(Gfx::IntRect const& from_rect, Gfx::IntRect
 
 void Window::start_minimize_animation()
 {
+    if (&window_stack() != &WindowManager::the().current_window_stack())
+        return;
     if (!m_have_taskbar_rect) {
         // If this is a modal window, it may not have its own taskbar
         // button, so there is no rectangle. In that case, walk the
@@ -368,6 +403,9 @@ void Window::start_minimize_animation()
 
 void Window::start_launch_animation(Gfx::IntRect const& launch_origin_rect)
 {
+    if (&window_stack() != &WindowManager::the().current_window_stack())
+        return;
+
     m_animation = Animation::create();
     m_animation->set_duration(150);
     m_animation->on_update = [this, launch_origin_rect](float progress, Gfx::Painter& painter, Screen& screen, Gfx::DisjointRectSet& flush_rects) {
@@ -438,6 +476,16 @@ void Window::set_maximized(bool maximized, Optional<Gfx::IntPoint> fixed_point)
     m_frame.did_set_maximized({}, maximized);
     Core::EventLoop::current().post_event(*this, make<ResizeEvent>(m_rect));
     set_default_positioned(false);
+}
+void Window::set_pinned(bool pinned)
+{
+    if (m_pinned == pinned)
+        return;
+
+    m_pinned = pinned;
+    update_window_menu_items();
+
+    window_stack().move_pinned_windows_to_front();
 }
 void Window::set_vertically_maximized()
 {
@@ -561,22 +609,24 @@ void Window::set_visible(bool b)
     if (!m_visible)
         WindowManager::the().check_hide_geometry_overlay(*this);
     Compositor::the().invalidate_occlusions();
-    if (m_visible)
+    if (m_visible) {
         invalidate(true);
-    else
-        Compositor::the().invalidate_screen(frame().render_rect());
+    } else {
+        // Since the window won't be visible we need to invalidate the last rendered
+        // rectangles before the next occlusion calculation
+        invalidate_last_rendered_screen_rects_now();
+    }
 }
 
 void Window::set_frameless(bool frameless)
 {
     if (m_frameless == frameless)
         return;
-    auto render_rect_before = frame().render_rect();
     m_frameless = frameless;
     if (m_visible) {
         Compositor::the().invalidate_occlusions();
         invalidate(true, true);
-        Compositor::the().invalidate_screen(frameless ? render_rect_before : frame().render_rect());
+        invalidate_last_rendered_screen_rects();
     }
 }
 
@@ -593,14 +643,14 @@ void Window::invalidate(bool invalidate_frame, bool re_render_frame)
     Compositor::the().invalidate_window();
 }
 
-void Window::invalidate(const Gfx::IntRect& rect, bool with_frame)
+void Window::invalidate(Gfx::IntRect const& rect)
 {
     if (type() == WindowType::Applet) {
         AppletManager::the().invalidate_applet(*this, rect);
         return;
     }
 
-    if (invalidate_no_notify(rect, with_frame))
+    if (invalidate_no_notify(rect))
         Compositor::the().invalidate_window();
 }
 
@@ -627,6 +677,24 @@ bool Window::invalidate_no_notify(const Gfx::IntRect& rect, bool with_frame)
         m_invalidated_frame |= true;
     m_dirty_rects.add(inner_rect.translated(-outer_rect.location()));
     return true;
+}
+
+void Window::invalidate_last_rendered_screen_rects()
+{
+    m_invalidate_last_render_rects = true;
+    Compositor::the().invalidate_occlusions();
+}
+
+void Window::invalidate_last_rendered_screen_rects_now()
+{
+    // We can't wait for the next occlusion computation because the window will either no longer
+    // be around or won't be visible anymore. So we need to invalidate the last rendered rects now.
+    if (!m_opaque_rects.is_empty())
+        Compositor::the().invalidate_screen(m_opaque_rects);
+    if (!m_transparency_rects.is_empty())
+        Compositor::the().invalidate_screen(m_transparency_rects);
+    m_invalidate_last_render_rects = false;
+    Compositor::the().invalidate_occlusions();
 }
 
 void Window::refresh_client_size()
@@ -664,9 +732,8 @@ void Window::clear_dirty_rects()
 
 bool Window::is_active() const
 {
-    if (!outer_stack())
-        return false;
-    return outer_stack()->active_window() == this;
+    VERIFY(m_window_stack);
+    return m_window_stack->active_window() == this;
 }
 
 Window* Window::blocking_modal_window()
@@ -729,6 +796,16 @@ void Window::ensure_window_menu()
 
         m_window_menu->add_item(make<MenuItem>(*m_window_menu, MenuItem::Type::Separator));
 
+        if (!m_modal) {
+            auto pin_item = make<MenuItem>(*m_window_menu, (unsigned)WindowMenuAction::TogglePinned, "&Pin Window");
+            m_window_menu_pin_item = pin_item.ptr();
+            m_window_menu_pin_item->set_icon(&pin_icon());
+            m_window_menu_pin_item->set_checkable(true);
+            m_window_menu->add_item(move(pin_item));
+        }
+
+        m_window_menu->add_item(make<MenuItem>(*m_window_menu, MenuItem::Type::Separator));
+
         auto close_item = make<MenuItem>(*m_window_menu, (unsigned)WindowMenuAction::Close, "&Close");
         m_window_menu_close_item = close_item.ptr();
         m_window_menu_close_item->set_icon(&close_icon());
@@ -747,8 +824,8 @@ void Window::handle_window_menu_action(WindowMenuAction action)
 {
     switch (action) {
     case WindowMenuAction::MinimizeOrUnminimize:
-        WindowManager::the().minimize_windows(*this, !m_minimized);
-        if (!m_minimized)
+        WindowManager::the().minimize_windows(*this, m_minimized_state == WindowMinimizedState::None);
+        if (m_minimized_state == WindowMinimizedState::None)
             WindowManager::the().move_to_front_and_make_active(*this);
         break;
     case WindowMenuAction::MaximizeOrRestore:
@@ -768,8 +845,14 @@ void Window::handle_window_menu_action(WindowMenuAction action)
         m_should_show_menubar = item.is_checked();
         frame().invalidate();
         recalculate_rect();
-        Compositor::the().invalidate_occlusions();
-        Compositor::the().invalidate_screen();
+        invalidate_last_rendered_screen_rects();
+        break;
+    }
+    case WindowMenuAction::TogglePinned: {
+        auto& item = *m_window_menu->item_by_identifier((unsigned)action);
+        auto new_is_checked = !item.is_checked();
+        item.set_checked(new_is_checked);
+        WindowManager::the().set_pinned(*this, new_is_checked);
         break;
     }
     }
@@ -788,7 +871,7 @@ void Window::popup_window_menu(const Gfx::IntPoint& position, WindowMenuDefaultA
             default_action = WindowMenuDefaultAction::Minimize;
     }
     m_window_menu_minimize_item->set_default(default_action == WindowMenuDefaultAction::Minimize || default_action == WindowMenuDefaultAction::Unminimize);
-    m_window_menu_minimize_item->set_icon(m_minimized ? nullptr : &minimize_icon());
+    m_window_menu_minimize_item->set_icon(m_minimized_state != WindowMinimizedState::None ? nullptr : &minimize_icon());
     m_window_menu_maximize_item->set_default(default_action == WindowMenuDefaultAction::Maximize || default_action == WindowMenuDefaultAction::Restore);
     m_window_menu_maximize_item->set_icon(m_maximized ? &restore_icon() : &maximize_icon());
     m_window_menu_close_item->set_default(default_action == WindowMenuDefaultAction::Close);
@@ -1181,8 +1264,7 @@ void Window::invalidate_menubar()
 {
     if (!m_should_show_menubar || !menubar())
         return;
-    // FIXME: This invalidates way more than the menubar!
-    frame().invalidate();
+    frame().invalidate_menubar();
 }
 
 void Window::set_modified(bool modified)
@@ -1204,4 +1286,5 @@ String Window::computed_title() const
         return String::formatted("{} (Not responding)", title);
     return title;
 }
+
 }

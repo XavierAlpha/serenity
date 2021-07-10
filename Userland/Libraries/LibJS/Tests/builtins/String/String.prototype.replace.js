@@ -102,3 +102,133 @@ test("functional regex replacement", () => {
         })
     ).toBe("xd");
 });
+
+test("replacement with substitution", () => {
+    expect("abc".replace("b", "$")).toBe("a$c");
+    expect("abc".replace("b", "$.")).toBe("a$.c");
+
+    expect("abc".replace("b", "$$")).toBe("a$c");
+    expect("abc".replace("b", ">$$<")).toBe("a>$<c");
+    expect("abc".replace("b", "$$$$")).toBe("a$$c");
+
+    expect("abc".replace("b", "$&")).toBe("abc");
+    expect("a123c".replace(/\d+/, "$&")).toBe("a123c");
+
+    expect("abc".replace("b", "$`")).toBe("aac");
+    expect("aabc".replace("b", "$`")).toBe("aaaac");
+    expect("a123c".replace(/\d+/, "$`")).toBe("aac");
+
+    expect("abc".replace("b", "$'")).toBe("acc");
+    expect("abcc".replace("b", "$'")).toBe("acccc");
+    expect("a123c".replace(/\d+/, "$'")).toBe("acc");
+
+    expect("abc".replace("b", "$0")).toBe("a$0c");
+    expect("abc".replace("b", "$99")).toBe("a$99c");
+    expect("abc".replace("b", "$100")).toBe("a$100c");
+    expect("abc".replace(/(a)b(c)/, "$0")).toBe("$0");
+    expect("abc".replace(/(a)b(c)/, "$1")).toBe("a");
+    expect("abc".replace(/(a)b(c)/, "$2")).toBe("c");
+    expect("abc".replace(/(a)b(c)/, "$3")).toBe("$3");
+    expect("abc".replace(/(a)b(c)/, "$2b$1")).toBe("cba");
+
+    expect("abc".replace("b", "$<val>")).toBe("a$<val>c");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<")).toBe("$<");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<not_terminated")).toBe("$<not_terminated");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<not_found>")).toBe("");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<val1>")).toBe("a");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<val2>")).toBe("c");
+    expect("abc".replace(/(?<val1>a)b(?<val2>c)/, "$<val2>b$<val1>")).toBe("cba");
+
+    expect(/(?<𝒜>b)/u[Symbol.replace]("abc", "d$<𝒜>$`")).toBe("adbac");
+    expect(/(?<$𐒤>b)/gu[Symbol.replace]("abc", "$'$<$𐒤>d")).toBe("acbdc");
+});
+
+test("replacement with substitution and 'groups' coerced to an object", () => {
+    var r = /./;
+    var coercibleValue = {
+        length: 1,
+        0: "b",
+        index: 1,
+        groups: "123",
+    };
+
+    r.exec = function () {
+        return coercibleValue;
+    };
+
+    expect(r[Symbol.replace]("ab", "[$<length>]")).toBe("a[3]");
+});
+
+test("replacement value is evaluated before searching the source string", () => {
+    var calls = 0;
+    var replaceValue = {
+        toString: function () {
+            calls += 1;
+            return "b";
+        },
+    };
+
+    var newString = "".replace("a", replaceValue);
+    expect(newString).toBe("");
+    expect(calls).toBe(1);
+
+    newString = "".replace(/a/g, replaceValue);
+    expect(newString).toBe("");
+    expect(calls).toBe(2);
+});
+
+test("search value is coerced to a string", () => {
+    var calls = 0;
+    var coerced;
+
+    var searchValue = {
+        toString: function () {
+            calls += 1;
+            return "x";
+        },
+    };
+
+    var replaceValue = function (matched) {
+        coerced = matched;
+        return "abc";
+    };
+
+    var newString = "x".replace(searchValue, replaceValue);
+    expect(newString).toBe("abc");
+    expect(coerced).toBe("x");
+});
+
+test("override exec with function", () => {
+    let calls = 0;
+
+    let re = /test/;
+    let oldExec = re.exec.bind(re);
+    re.exec = function (...args) {
+        ++calls;
+        return oldExec(...args);
+    };
+
+    expect("test".replace(re, "x")).toBe("x");
+    expect(calls).toBe(1);
+});
+
+test("override exec with bad function", () => {
+    let calls = 0;
+
+    let re = /test/;
+    re.exec = function (...args) {
+        ++calls;
+        return 4;
+    };
+
+    expect(() => {
+        "test".replace(re, "x");
+    }).toThrow(TypeError);
+    expect(calls).toBe(1);
+});
+
+test("override exec with non-function", () => {
+    let re = /test/;
+    re.exec = 3;
+    expect("test".replace(re, "x")).toBe("x");
+});

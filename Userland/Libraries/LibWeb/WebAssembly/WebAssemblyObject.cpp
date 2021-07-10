@@ -31,30 +31,31 @@ void WebAssemblyObject::initialize(JS::GlobalObject& global_object)
 {
     Object::initialize(global_object);
 
-    define_native_function("validate", validate, 1);
-    define_native_function("compile", compile, 1);
-    define_native_function("instantiate", instantiate, 1);
+    u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
+    define_native_function("validate", validate, 1, attr);
+    define_native_function("compile", compile, 1, attr);
+    define_native_function("instantiate", instantiate, 1, attr);
 
     auto& vm = global_object.vm();
 
     auto& window = static_cast<WindowObject&>(global_object);
     auto& memory_constructor = window.ensure_web_constructor<WebAssemblyMemoryConstructor>("WebAssembly.Memory");
-    memory_constructor.define_property(vm.names.name, js_string(vm, "WebAssembly.Memory"), JS::Attribute::Configurable);
+    memory_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Memory"), JS::Attribute::Configurable);
     auto& memory_prototype = window.ensure_web_prototype<WebAssemblyMemoryPrototype>("WebAssemblyMemoryPrototype");
-    memory_prototype.define_property(vm.names.constructor, &memory_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
-    define_property("Memory", &memory_constructor);
+    memory_prototype.define_direct_property(vm.names.constructor, &memory_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
+    define_direct_property("Memory", &memory_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 
     auto& instance_constructor = window.ensure_web_constructor<WebAssemblyInstanceConstructor>("WebAssembly.Instance");
-    instance_constructor.define_property(vm.names.name, js_string(vm, "WebAssembly.Instance"), JS::Attribute::Configurable);
+    instance_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Instance"), JS::Attribute::Configurable);
     auto& instance_prototype = window.ensure_web_prototype<WebAssemblyInstancePrototype>("WebAssemblyInstancePrototype");
-    instance_prototype.define_property(vm.names.constructor, &instance_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
-    define_property("Instance", &instance_constructor);
+    instance_prototype.define_direct_property(vm.names.constructor, &instance_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
+    define_direct_property("Instance", &instance_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 
     auto& module_constructor = window.ensure_web_constructor<WebAssemblyModuleConstructor>("WebAssembly.Module");
-    module_constructor.define_property(vm.names.name, js_string(vm, "WebAssembly.Module"), JS::Attribute::Configurable);
+    module_constructor.define_direct_property(vm.names.name, js_string(vm, "WebAssembly.Module"), JS::Attribute::Configurable);
     auto& module_prototype = window.ensure_web_prototype<WebAssemblyModulePrototype>("WebAssemblyModulePrototype");
-    module_prototype.define_property(vm.names.constructor, &module_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
-    define_property("Module", &module_constructor);
+    module_prototype.define_direct_property(vm.names.constructor, &module_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
+    define_direct_property("Module", &module_constructor, JS::Attribute::Writable | JS::Attribute::Configurable);
 }
 
 NonnullOwnPtrVector<WebAssemblyObject::CompiledWebAssemblyModule> WebAssemblyObject::s_compiled_modules;
@@ -328,8 +329,8 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyObject::instantiate)
         auto instance_object = vm.heap().allocate<WebAssemblyInstanceObject>(global_object, global_object, result.value());
         if (should_return_module) {
             auto object = JS::Object::create(global_object, nullptr);
-            object->put("module", vm.heap().allocate<WebAssemblyModuleObject>(global_object, global_object, s_compiled_modules.size() - 1));
-            object->put("instance", instance_object);
+            object->define_direct_property("module", vm.heap().allocate<WebAssemblyModuleObject>(global_object, global_object, s_compiled_modules.size() - 1), JS::default_attributes);
+            object->define_direct_property("instance", instance_object, JS::default_attributes);
             promise->fulfill(object);
         } else {
             promise->fulfill(instance_object);

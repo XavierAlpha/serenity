@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/LexicalPath.h>
 #include <AK/StringView.h>
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
+#include <Kernel/KLexicalPath.h>
 #include <Kernel/Process.h>
 
 namespace Kernel {
@@ -86,21 +86,27 @@ KResultOr<FlatPtr> Process::sys$unveil(Userspace<const Syscall::SC_unveil_params
     // because they most likely intend the program to create the file for them later on.
     // If this case is encountered, the parent node of the path is returned and the custody of that inode is used instead.
     RefPtr<Custody> parent_custody; // Parent inode in case of ENOENT
-    String new_unveiled_path;
-    auto custody_or_error = VFS::the().resolve_path_without_veil(path.view(), root_directory(), &parent_custody);
+    OwnPtr<KString> new_unveiled_path;
+    auto custody_or_error = VirtualFileSystem::the().resolve_path_without_veil(path.view(), root_directory(), &parent_custody);
     if (!custody_or_error.is_error()) {
-        new_unveiled_path = custody_or_error.value()->absolute_path();
+        new_unveiled_path = custody_or_error.value()->try_create_absolute_path();
+        if (!new_unveiled_path)
+            return ENOMEM;
     } else if (custody_or_error.error() == -ENOENT && parent_custody && (new_permissions & UnveilAccess::CreateOrRemove)) {
-        String basename = LexicalPath::basename(path.view());
-        new_unveiled_path = String::formatted("{}/{}", parent_custody->absolute_path(), basename);
+        auto parent_custody_path = parent_custody->try_create_absolute_path();
+        if (!parent_custody_path)
+            return ENOMEM;
+        new_unveiled_path = KLexicalPath::try_join(parent_custody_path->view(), KLexicalPath::basename(path.view()));
+        if (!new_unveiled_path)
+            return ENOMEM;
     } else {
         // FIXME Should this be EINVAL?
         return custody_or_error.error();
     }
 
-    LexicalPath lexical_path(new_unveiled_path);
-    auto it = lexical_path.parts_view().begin();
-    auto& matching_node = m_unveiled_paths.traverse_until_last_accessible_node(it, lexical_path.parts_view().end());
+    auto path_parts = KLexicalPath::parts(new_unveiled_path->view());
+    auto it = path_parts.begin();
+    auto& matching_node = m_unveiled_paths.traverse_until_last_accessible_node(it, path_parts.end());
     if (it.is_end()) {
         // If the path has already been explicitly unveiled, do not allow elevating its permissions.
         if (matching_node.was_explicitly_unveiled()) {
@@ -122,10 +128,10 @@ KResultOr<FlatPtr> Process::sys$unveil(Userspace<const Syscall::SC_unveil_params
 
     matching_node.insert(
         it,
-        lexical_path.parts_view().end(),
-        { new_unveiled_path, (UnveilAccess)new_permissions, true },
+        path_parts.end(),
+        { new_unveiled_path->view(), (UnveilAccess)new_permissions, true },
         [](auto& parent, auto& it) -> Optional<UnveilMetadata> {
-            auto path = LexicalPath::join(parent.path(), *it).string();
+            auto path = String::formatted("{}/{}", parent.path(), *it);
             return UnveilMetadata { path, parent.permissions(), false };
         });
 

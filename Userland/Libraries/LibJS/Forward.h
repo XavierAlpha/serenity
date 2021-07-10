@@ -76,6 +76,10 @@
     __JS_ENUMERATE(Float32Array, float32_array, Float32ArrayPrototype, Float32ArrayConstructor, float)                          \
     __JS_ENUMERATE(Float64Array, float64_array, Float64ArrayPrototype, Float64ArrayConstructor, double)
 
+#define JS_ENUMERATE_TEMPORAL_OBJECTS                                      \
+    __JS_ENUMERATE(Instant, instant, InstantPrototype, InstantConstructor) \
+    __JS_ENUMERATE(TimeZone, time_zone, TimeZonePrototype, TimeZoneConstructor)
+
 #define JS_ENUMERATE_ITERATOR_PROTOTYPES          \
     __JS_ENUMERATE(Iterator, iterator)            \
     __JS_ENUMERATE(ArrayIterator, array_iterator) \
@@ -94,6 +98,7 @@
     __JS_ENUMERATE(match, match)                             \
     __JS_ENUMERATE(matchAll, match_all)                      \
     __JS_ENUMERATE(replace, replace)                         \
+    __JS_ENUMERATE(replaceAll, replace_all)                  \
     __JS_ENUMERATE(search, search)                           \
     __JS_ENUMERATE(split, split)                             \
     __JS_ENUMERATE(hasInstance, has_instance)                \
@@ -103,13 +108,14 @@
     __JS_ENUMERATE(toPrimitive, to_primitive)                \
     __JS_ENUMERATE(toStringTag, to_string_tag)
 
-#define JS_ENUMERATE_REGEXP_FLAGS                           \
-    __JS_ENUMERATE(global, global, g, Global)               \
-    __JS_ENUMERATE(ignoreCase, ignore_case, i, Insensitive) \
-    __JS_ENUMERATE(multiline, multiline, m, Multiline)      \
-    __JS_ENUMERATE(dotAll, dot_all, s, SingleLine)          \
-    __JS_ENUMERATE(unicode, unicode, u, Unicode)            \
-    __JS_ENUMERATE(sticky, sticky, y, Sticky)
+#define JS_ENUMERATE_REGEXP_FLAGS              \
+    __JS_ENUMERATE(hasIndices, has_indices, d) \
+    __JS_ENUMERATE(global, global, g)          \
+    __JS_ENUMERATE(ignoreCase, ignore_case, i) \
+    __JS_ENUMERATE(multiline, multiline, m)    \
+    __JS_ENUMERATE(dotAll, dot_all, s)         \
+    __JS_ENUMERATE(unicode, unicode, u)        \
+    __JS_ENUMERATE(sticky, sticky, y)
 
 namespace JS {
 
@@ -138,12 +144,13 @@ class HeapBlock;
 class Interpreter;
 class MarkedValueList;
 class NativeFunction;
-class NativeProperty;
 class ObjectEnvironment;
 class PrimitiveString;
 class PromiseReaction;
 class PromiseReactionJob;
 class PromiseResolveThenableJob;
+class PropertyAttributes;
+class PropertyDescriptor;
 class PropertyName;
 class Reference;
 class ScopeNode;
@@ -173,11 +180,6 @@ class TypedArrayPrototype;
 // Tag type used to differentiate between u8 as used by Uint8Array and u8 as used by Uint8ClampedArray.
 struct ClampedU8;
 
-enum class AllowSideEffects {
-    Yes,
-    No
-};
-
 #define __JS_ENUMERATE(ClassName, snake_name, ConstructorName, PrototypeName, ArrayType) \
     class ClassName;                                                                     \
     class ConstructorName;                                                               \
@@ -186,6 +188,15 @@ JS_ENUMERATE_NATIVE_OBJECTS_EXCLUDING_TEMPLATES
 JS_ENUMERATE_NATIVE_ERRORS
 JS_ENUMERATE_TYPED_ARRAYS
 #undef __JS_ENUMERATE
+
+namespace Temporal {
+#define __JS_ENUMERATE(ClassName, snake_name, ConstructorName, PrototypeName) \
+    class ClassName;                                                          \
+    class ConstructorName;                                                    \
+    class PrototypeName;
+JS_ENUMERATE_TEMPORAL_OBJECTS
+#undef __JS_ENUMERATE
+};
 
 template<class T>
 class Handle;

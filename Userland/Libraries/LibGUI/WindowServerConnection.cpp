@@ -48,12 +48,12 @@ WindowServerConnection::WindowServerConnection()
     //       All we have to do is wait for it to arrive. This avoids a round-trip during application startup.
     auto message = wait_for_specific_message<Messages::WindowClient::FastGreet>();
     set_system_theme_from_anonymous_buffer(message->theme_buffer());
-    Desktop::the().did_receive_screen_rects({}, message->screen_rects(), message->main_screen_index());
+    Desktop::the().did_receive_screen_rects({}, message->screen_rects(), message->main_screen_index(), message->virtual_desktop_rows(), message->virtual_desktop_columns());
     Gfx::FontDatabase::set_default_font_query(message->default_font_query());
     Gfx::FontDatabase::set_fixed_width_font_query(message->fixed_width_font_query());
 }
 
-void WindowServerConnection::fast_greet(Vector<Gfx::IntRect> const&, u32, Core::AnonymousBuffer const&, String const&, String const&)
+void WindowServerConnection::fast_greet(Vector<Gfx::IntRect> const&, u32, u32, u32, Core::AnonymousBuffer const&, String const&, String const&)
 {
     // NOTE: This message is handled in the constructor.
 }
@@ -203,7 +203,7 @@ void WindowServerConnection::key_up(i32 window_id, u32 code_point, u32 key, u32 
     Core::EventLoop::current().post_event(*window, move(key_event));
 }
 
-static MouseButton to_gmousebutton(u32 button)
+static MouseButton to_mouse_button(u32 button)
 {
     switch (button) {
     case 0:
@@ -227,13 +227,13 @@ static MouseButton to_gmousebutton(u32 button)
 void WindowServerConnection::mouse_down(i32 window_id, Gfx::IntPoint const& mouse_position, u32 button, u32 buttons, u32 modifiers, i32 wheel_delta)
 {
     if (auto* window = Window::from_window_id(window_id))
-        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseDown, mouse_position, buttons, to_gmousebutton(button), modifiers, wheel_delta));
+        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseDown, mouse_position, buttons, to_mouse_button(button), modifiers, wheel_delta));
 }
 
 void WindowServerConnection::mouse_up(i32 window_id, Gfx::IntPoint const& mouse_position, u32 button, u32 buttons, u32 modifiers, i32 wheel_delta)
 {
     if (auto* window = Window::from_window_id(window_id))
-        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseUp, mouse_position, buttons, to_gmousebutton(button), modifiers, wheel_delta));
+        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseUp, mouse_position, buttons, to_mouse_button(button), modifiers, wheel_delta));
 }
 
 void WindowServerConnection::mouse_move(i32 window_id, Gfx::IntPoint const& mouse_position, u32 button, u32 buttons, u32 modifiers, i32 wheel_delta, bool is_drag, Vector<String> const& mime_types)
@@ -242,20 +242,20 @@ void WindowServerConnection::mouse_move(i32 window_id, Gfx::IntPoint const& mous
         if (is_drag)
             Core::EventLoop::current().post_event(*window, make<DragEvent>(Event::DragMove, mouse_position, mime_types));
         else
-            Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseMove, mouse_position, buttons, to_gmousebutton(button), modifiers, wheel_delta));
+            Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseMove, mouse_position, buttons, to_mouse_button(button), modifiers, wheel_delta));
     }
 }
 
 void WindowServerConnection::mouse_double_click(i32 window_id, Gfx::IntPoint const& mouse_position, u32 button, u32 buttons, u32 modifiers, i32 wheel_delta)
 {
     if (auto* window = Window::from_window_id(window_id))
-        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseDoubleClick, mouse_position, buttons, to_gmousebutton(button), modifiers, wheel_delta));
+        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseDoubleClick, mouse_position, buttons, to_mouse_button(button), modifiers, wheel_delta));
 }
 
 void WindowServerConnection::mouse_wheel(i32 window_id, Gfx::IntPoint const& mouse_position, u32 button, u32 buttons, u32 modifiers, i32 wheel_delta)
 {
     if (auto* window = Window::from_window_id(window_id))
-        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseWheel, mouse_position, buttons, to_gmousebutton(button), modifiers, wheel_delta));
+        Core::EventLoop::current().post_event(*window, make<MouseEvent>(Event::MouseWheel, mouse_position, buttons, to_mouse_button(button), modifiers, wheel_delta));
 }
 
 void WindowServerConnection::menu_visibility_did_change(i32 menu_id, bool visible)
@@ -311,9 +311,9 @@ void WindowServerConnection::menu_item_left(i32 menu_id, u32 identifier)
     Core::EventLoop::current().post_event(*app, make<ActionEvent>(GUI::Event::ActionLeave, *action));
 }
 
-void WindowServerConnection::screen_rects_changed(Vector<Gfx::IntRect> const& rects, u32 main_screen_index)
+void WindowServerConnection::screen_rects_changed(Vector<Gfx::IntRect> const& rects, u32 main_screen_index, u32 virtual_desktop_rows, u32 virtual_desktop_columns)
 {
-    Desktop::the().did_receive_screen_rects({}, rects, main_screen_index);
+    Desktop::the().did_receive_screen_rects({}, rects, main_screen_index, virtual_desktop_rows, virtual_desktop_columns);
     Window::for_each_window({}, [&](auto& window) {
         Core::EventLoop::current().post_event(window, make<ScreenRectsChangeEvent>(rects, main_screen_index));
     });

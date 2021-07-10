@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Demangle.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
 #include <AK/Time.h>
@@ -68,7 +67,7 @@ Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Region> kernel_stac
     , m_fpu_state(fpu_state)
     , m_name(m_process->name())
     , m_block_timer(block_timer)
-    , m_global_procfs_inode_index(ProcFSComponentsRegistrar::the().allocate_inode_index())
+    , m_global_procfs_inode_index(ProcFSComponentRegistry::the().allocate_inode_index())
 {
     bool is_first_thread = m_process->add_thread(*this);
     if (is_first_thread) {
@@ -102,9 +101,9 @@ Thread::Thread(NonnullRefPtr<Process> process, NonnullOwnPtr<Region> kernel_stac
         m_regs.cs = GDT_SELECTOR_CODE0;
         m_regs.ds = GDT_SELECTOR_DATA0;
         m_regs.es = GDT_SELECTOR_DATA0;
-        m_regs.fs = GDT_SELECTOR_PROC;
+        m_regs.fs = 0;
         m_regs.ss = GDT_SELECTOR_DATA0;
-        m_regs.gs = 0;
+        m_regs.gs = GDT_SELECTOR_PROC;
     } else {
         m_regs.cs = GDT_SELECTOR_CODE3 | 3;
         m_regs.ds = GDT_SELECTOR_DATA3 | 3;
@@ -334,18 +333,6 @@ void Thread::yield_without_holding_big_lock()
     relock_process(previous_locked, lock_count_to_restore);
 }
 
-void Thread::donate_without_holding_big_lock(RefPtr<Thread>& thread, const char* reason)
-{
-    VERIFY(!g_scheduler_lock.own_lock());
-    u32 lock_count_to_restore = 0;
-    auto previous_locked = unlock_process_if_locked(lock_count_to_restore);
-    // NOTE: Even though we call Scheduler::yield here, unless we happen
-    // to be outside of a critical section, the yield will be postponed
-    // until leaving it in relock_process.
-    Scheduler::donate_to(thread, reason);
-    relock_process(previous_locked, lock_count_to_restore);
-}
-
 LockMode Thread::unlock_process_if_locked(u32& lock_count_to_restore)
 {
     return process().big_lock().force_unlock_if_locked(lock_count_to_restore);
@@ -354,8 +341,8 @@ LockMode Thread::unlock_process_if_locked(u32& lock_count_to_restore)
 void Thread::relock_process(LockMode previous_locked, u32 lock_count_to_restore)
 {
     // Clearing the critical section may trigger the context switch
-    // flagged by calling Scheduler::donate_to or Scheduler::yield
-    // above. We have to do it this way because we intentionally
+    // flagged by calling Scheduler::yield above.
+    // We have to do it this way because we intentionally
     // leave the critical section here to be able to switch contexts.
     u32 prev_flags;
     u32 prev_crit = Processor::current().clear_critical(prev_flags, true);
@@ -846,7 +833,9 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         // Align the stack to 16 bytes.
         // Note that we push 56 bytes (4 * 14) on to the stack,
         // so we need to account for this here.
-        FlatPtr stack_alignment = (*stack - 56) % 16;
+        // 56 % 16 = 8, so we only need to take 8 bytes into consideration for
+        // the stack alignment.
+        FlatPtr stack_alignment = (*stack - 8) % 16;
         *stack -= stack_alignment;
 
         push_value_on_user_stack(stack, ret_eflags);
@@ -864,8 +853,11 @@ DispatchSignalResult Thread::dispatch_signal(u8 signal)
         // Align the stack to 16 bytes.
         // Note that we push 176 bytes (8 * 22) on to the stack,
         // so we need to account for this here.
-        FlatPtr stack_alignment = (*stack - 112) % 16;
-        *stack -= stack_alignment;
+        // 22 % 2 = 0, so we dont need to take anything into consideration
+        // for the alignment.
+        // We also are not allowed to touch the thread's red-zone of 128 bytes
+        FlatPtr stack_alignment = *stack % 16;
+        *stack -= 128 + stack_alignment;
 
         push_value_on_user_stack(stack, ret_rflags);
 
@@ -1032,7 +1024,7 @@ struct RecognizedSymbol {
     const KernelSymbol* symbol { nullptr };
 };
 
-static bool symbolicate(const RecognizedSymbol& symbol, const Process& process, StringBuilder& builder)
+static bool symbolicate(RecognizedSymbol const& symbol, Process& process, StringBuilder& builder)
 {
     if (!symbol.address)
         return false;
@@ -1042,7 +1034,15 @@ static bool symbolicate(const RecognizedSymbol& symbol, const Process& process, 
         if (!is_user_address(VirtualAddress(symbol.address))) {
             builder.append("0xdeadc0de\n");
         } else {
-            builder.appendff("{:p}\n", symbol.address);
+            if (auto* region = process.space().find_region_containing({ VirtualAddress(symbol.address), sizeof(FlatPtr) })) {
+                size_t offset = symbol.address - region->vaddr().get();
+                if (auto region_name = region->name(); !region_name.is_null() && !region_name.is_empty())
+                    builder.appendff("{:p}  {} + 0x{:x}\n", (void*)symbol.address, region_name, offset);
+                else
+                    builder.appendff("{:p}  {:p} + 0x{:x}\n", (void*)symbol.address, region->vaddr().as_ptr(), offset);
+            } else {
+                builder.appendff("{:p}\n", symbol.address);
+            }
         }
         return true;
     }
@@ -1050,7 +1050,7 @@ static bool symbolicate(const RecognizedSymbol& symbol, const Process& process, 
     if (symbol.symbol->address == g_highest_kernel_symbol_address && offset > 4096) {
         builder.appendff("{:p}\n", (void*)(mask_kernel_addresses ? 0xdeadc0de : symbol.address));
     } else {
-        builder.appendff("{:p}  {} +{}\n", (void*)(mask_kernel_addresses ? 0xdeadc0de : symbol.address), demangle(symbol.symbol->name), offset);
+        builder.appendff("{:p}  {} + 0x{:x}\n", (void*)(mask_kernel_addresses ? 0xdeadc0de : symbol.address), symbol.symbol->name, offset);
     }
     return true;
 }

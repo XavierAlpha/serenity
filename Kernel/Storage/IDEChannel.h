@@ -99,7 +99,7 @@ public:
     RefPtr<StorageDevice> master_device() const;
     RefPtr<StorageDevice> slave_device() const;
 
-    virtual const char* purpose() const override { return "PATA Channel"; }
+    virtual StringView purpose() const override { return "PATA Channel"; }
 
     virtual bool is_dma_enabled() const { return false; }
 
@@ -155,7 +155,7 @@ protected:
     RefPtr<StorageDevice> m_slave;
 
     RefPtr<AsyncBlockDeviceRequest> m_current_request;
-    size_t m_current_request_block_index { 0 };
+    u64 m_current_request_block_index { 0 };
     bool m_current_request_flushing_cache { false };
     SpinLock<u8> m_request_lock;
     Lock m_lock { "IDEChannel" };

@@ -319,20 +319,18 @@ void DynamicLoader::load_program_headers()
     }
 
     for (auto& text_region : text_regions) {
+        FlatPtr ph_text_desired_base = text_region.desired_load_address().get();
         FlatPtr ph_text_base = text_region.desired_load_address().page_base().get();
         FlatPtr ph_text_end = ph_text_base + round_up_to_power_of_two(text_region.size_in_memory() + (size_t)(text_region.desired_load_address().as_ptr() - ph_text_base), PAGE_SIZE);
 
-        auto* text_segment_address = (u8*)reservation + ph_text_base;
-        size_t text_segment_size = ph_text_end - ph_text_base;
-
         // Now we can map the text segment at the reserved address.
         auto* text_segment_begin = (u8*)mmap_with_name(
-            text_segment_address,
-            text_segment_size,
+            (u8*)reservation + ph_text_base - ph_load_base,
+            ph_text_desired_base - ph_text_base + text_region.size_in_image(),
             PROT_READ,
             MAP_FILE | MAP_SHARED | MAP_FIXED,
             m_image_fd,
-            text_region.offset(),
+            VirtualAddress { text_region.offset() }.page_base().get(),
             String::formatted("{}: .text", m_filename).characters());
 
         if (text_segment_begin == MAP_FAILED) {
@@ -340,18 +338,18 @@ void DynamicLoader::load_program_headers()
             VERIFY_NOT_REACHED();
         }
 
-        m_text_segments.append({ VirtualAddress { (FlatPtr)text_segment_begin }, text_segment_size });
+        m_text_segments.append({ VirtualAddress { (FlatPtr)text_segment_begin }, ph_text_end - ph_text_base });
     }
 
     VERIFY(requested_load_address == nullptr || requested_load_address == reservation);
 
     if (relro_region.has_value()) {
         m_relro_segment_size = relro_region->size_in_memory();
-        m_relro_segment_address = VirtualAddress { (u8*)reservation + relro_region->desired_load_address().get() };
+        m_relro_segment_address = VirtualAddress { (u8*)reservation + relro_region->desired_load_address().get() - ph_load_base };
     }
 
     if (m_elf_image.is_dynamic())
-        m_dynamic_section_address = VirtualAddress { (u8*)reservation + dynamic_region_desired_vaddr.get() };
+        m_dynamic_section_address = VirtualAddress { (u8*)reservation + dynamic_region_desired_vaddr.get() - ph_load_base };
     else
         m_dynamic_section_address = dynamic_region_desired_vaddr;
 
@@ -359,7 +357,7 @@ void DynamicLoader::load_program_headers()
         FlatPtr ph_data_base = data_region.desired_load_address().page_base().get();
         FlatPtr ph_data_end = ph_data_base + round_up_to_power_of_two(data_region.size_in_memory() + (size_t)(data_region.desired_load_address().as_ptr() - ph_data_base), PAGE_SIZE);
 
-        auto* data_segment_address = (u8*)reservation + ph_data_base;
+        auto* data_segment_address = (u8*)reservation + ph_data_base - ph_load_base;
         size_t data_segment_size = ph_data_end - ph_data_base;
 
         // Finally, we make an anonymous mapping for the data segment. Contents are then copied from the file.
@@ -478,24 +476,27 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
 #ifndef __LP64__
     case R_386_TLS_TPOFF32:
     case R_386_TLS_TPOFF: {
+#else
+    case R_X86_64_TPOFF64: {
+#endif
         auto symbol = relocation.symbol();
-        // For some reason, LibC has a R_386_TLS_TPOFF that refers to the undefined symbol.. huh
-        if (relocation.symbol_index() == 0)
-            break;
-        auto res = lookup_symbol(symbol);
-        if (!res.has_value())
-            break;
-        auto* dynamic_object_of_symbol = res.value().dynamic_object;
+        FlatPtr symbol_value;
+        DynamicObject const* dynamic_object_of_symbol;
+        if (relocation.symbol_index() != 0) {
+            auto res = lookup_symbol(symbol);
+            if (!res.has_value())
+                break;
+            symbol_value = res.value().value;
+            dynamic_object_of_symbol = res.value().dynamic_object;
+        } else {
+            symbol_value = 0;
+            dynamic_object_of_symbol = &relocation.dynamic_object();
+        }
         VERIFY(dynamic_object_of_symbol);
-        *patch_ptr = negative_offset_from_tls_block_end(res.value().value, dynamic_object_of_symbol->tls_offset().value(), res.value().size);
+        size_t addend = relocation.addend_used() ? relocation.addend() : *patch_ptr;
+        *patch_ptr = negative_offset_from_tls_block_end(dynamic_object_of_symbol->tls_offset().value(), symbol_value + addend);
         break;
     }
-#else
-    case R_X86_64_TPOFF64:
-        dbgln("FIXME: Patched R_X86_64_TPOFF64 relocation with invalid ptr.");
-        *patch_ptr = 0xaaaaaaaaaaaaaaaa;
-        break;
-#endif
 #ifndef __LP64__
     case R_386_JMP_SLOT: {
 #else
@@ -522,10 +523,9 @@ DynamicLoader::RelocationResult DynamicLoader::do_relocation(const ELF::DynamicO
     return RelocationResult::Success;
 }
 
-ssize_t DynamicLoader::negative_offset_from_tls_block_end(size_t value_of_symbol, size_t tls_offset, size_t symbol_size) const
+ssize_t DynamicLoader::negative_offset_from_tls_block_end(ssize_t tls_offset, size_t value_of_symbol) const
 {
-    VERIFY(symbol_size > 0);
-    ssize_t offset = -static_cast<ssize_t>(value_of_symbol + tls_offset + symbol_size);
+    ssize_t offset = static_cast<ssize_t>(tls_offset + value_of_symbol);
     // At offset 0 there's the thread's ThreadSpecificData structure, we don't want to collide with it.
     VERIFY(offset < 0);
     return offset;
@@ -552,7 +552,7 @@ void DynamicLoader::copy_initial_tls_data_into(ByteBuffer& buffer) const
         if (symbol.type() != STT_TLS)
             return IterationDecision::Continue;
 
-        ssize_t negative_offset = negative_offset_from_tls_block_end(symbol.value(), m_tls_offset, symbol.size());
+        ssize_t negative_offset = negative_offset_from_tls_block_end(m_tls_offset, symbol.value());
         VERIFY(symbol.size() != 0);
         VERIFY(buffer.size() + negative_offset + symbol.size() <= buffer.size());
         memcpy(buffer.data() + buffer.size() + negative_offset, tls_data + symbol.value(), symbol.size());

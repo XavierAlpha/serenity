@@ -58,6 +58,7 @@ struct Message {
 };
 
 struct Endpoint {
+    Vector<String> includes;
     String name;
     u32 magic;
     Vector<Message> messages;
@@ -197,8 +198,29 @@ int main(int argc, char** argv)
         }
     };
 
+    auto parse_include = [&] {
+        String include;
+        consume_whitespace();
+        include = lexer.consume_while([](char ch) { return ch != '\n'; });
+        consume_whitespace();
+
+        endpoints.last().includes.append(move(include));
+    };
+
+    auto parse_includes = [&] {
+        for (;;) {
+            consume_whitespace();
+            if (lexer.peek() != '#')
+                break;
+            parse_include();
+            consume_whitespace();
+        }
+    };
+
     auto parse_endpoint = [&] {
         endpoints.empend();
+        consume_whitespace();
+        parse_includes();
         consume_whitespace();
         lexer.consume_specific("endpoint");
         consume_whitespace();
@@ -241,17 +263,20 @@ int main(int argc, char** argv)
     StringBuilder builder;
     SourceGenerator generator { builder };
 
-    generator.append(R"~~~(
-#pragma once
-#include <AK/MemoryStream.h>
+    generator.append("#pragma once\n");
+
+    // This must occur before LibIPC/Decoder.h
+    for (auto& endpoint : endpoints) {
+        for (auto& include : endpoint.includes) {
+            generator.append(include);
+            generator.append("\n");
+        }
+    }
+
+    generator.append(R"~~~(#include <AK/MemoryStream.h>
 #include <AK/OwnPtr.h>
 #include <AK/Result.h>
-#include <AK/URL.h>
 #include <AK/Utf8View.h>
-#include <LibCore/AnonymousBuffer.h>
-#include <LibGfx/Color.h>
-#include <LibGfx/Rect.h>
-#include <LibGfx/ShareableBitmap.h>
 #include <LibIPC/Connection.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Dictionary.h>
@@ -259,6 +284,11 @@ int main(int argc, char** argv)
 #include <LibIPC/File.h>
 #include <LibIPC/Message.h>
 #include <LibIPC/Stub.h>
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdefaulted-function-deleted"
+#endif
 )~~~");
 
     for (auto& endpoint : endpoints) {
@@ -840,6 +870,10 @@ public:
         endpoint_generator.append(R"~~~(
 private:
 };
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 )~~~");
     }
 

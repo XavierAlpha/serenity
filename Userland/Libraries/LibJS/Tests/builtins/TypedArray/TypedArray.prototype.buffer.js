@@ -1,5 +1,6 @@
 const TYPED_ARRAYS = [
     Uint8Array,
+    Uint8ClampedArray,
     Uint16Array,
     Uint32Array,
     BigUint64Array,
@@ -19,7 +20,7 @@ test("basic functionality", () => {
         if (!isBigIntArray) typedArray = new T([1, 2, 3]);
         else typedArray = new T([1n, 2n, 3n]);
 
-        expect(Object.hasOwn(typedArray, "byteOffset")).toBeFalse();
+        expect(Object.hasOwn(typedArray, "buffer")).toBeFalse();
 
         const buffer = typedArray.buffer;
         expect(buffer).toBeInstanceOf(ArrayBuffer);

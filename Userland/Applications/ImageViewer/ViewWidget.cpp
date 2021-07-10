@@ -6,9 +6,11 @@
  */
 
 #include "ViewWidget.h"
+#include <AK/LexicalPath.h>
 #include <AK/MappedFile.h>
 #include <AK/StringBuilder.h>
 #include <LibCore/DirIterator.h>
+#include <LibCore/File.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/MessageBox.h>
 #include <LibGUI/Painter.h>
@@ -63,12 +65,7 @@ void ViewWidget::navigate(Directions direction)
     if (m_path == nullptr)
         return;
 
-    auto parts = m_path.split('/');
-    parts.remove(parts.size() - 1);
-    StringBuilder sb;
-    sb.append("/");
-    sb.join("/", parts);
-    auto current_dir = sb.to_string();
+    auto current_dir = LexicalPath(m_path).parent().string();
 
     if (m_files_in_same_dir.is_empty()) {
         Core::DirIterator iterator(current_dir, Core::DirIterator::Flags::SkipDots);
@@ -271,7 +268,7 @@ void ViewWidget::load_from_file(const String& path)
         m_timer->stop();
     }
 
-    m_path = path;
+    m_path = Core::File::real_path_for(path);
     m_scale = -1;
     reset_view();
 }

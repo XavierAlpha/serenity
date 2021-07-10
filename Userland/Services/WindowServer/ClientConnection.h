@@ -42,7 +42,7 @@ public:
     static ClientConnection* from_client_id(int client_id);
     static void for_each_client(Function<void(ClientConnection&)>);
 
-    void notify_about_new_screen_rects(const Vector<Gfx::IntRect, 4>&, size_t);
+    void notify_about_new_screen_rects();
     void post_paint_message(Window&, bool ignore_occlusion = false);
 
     Menu* find_menu_by_id(int menu_id)
@@ -99,7 +99,7 @@ private:
     virtual void add_menu_item(i32, i32, i32, String const&, bool, bool, bool, bool, String const&, Gfx::ShareableBitmap const&, bool) override;
     virtual void add_menu_separator(i32) override;
     virtual void update_menu_item(i32, i32, i32, String const&, bool, bool, bool, bool, String const&) override;
-    virtual void create_window(i32, Gfx::IntRect const&, bool, bool, bool,
+    virtual void create_window(i32, Gfx::IntRect const&, bool, bool, bool, bool,
         bool, bool, bool, bool, bool, float, float, Gfx::IntSize const&, Gfx::IntSize const&, Gfx::IntSize const&,
         Optional<Gfx::IntSize> const&, i32, String const&, i32, Gfx::IntRect const&) override;
     virtual Messages::WindowServer::DestroyWindowResponse destroy_window(i32) override;
@@ -123,6 +123,7 @@ private:
     virtual void move_window_to_front(i32) override;
     virtual void set_fullscreen(i32, bool) override;
     virtual void set_frameless(i32, bool) override;
+    virtual void set_forced_shadow(i32, bool) override;
     virtual void set_wallpaper(String const&) override;
     virtual void set_background_color(String const&) override;
     virtual void set_wallpaper_mode(String const&) override;
@@ -130,6 +131,8 @@ private:
     virtual Messages::WindowServer::SetScreenLayoutResponse set_screen_layout(ScreenLayout const&, bool) override;
     virtual Messages::WindowServer::GetScreenLayoutResponse get_screen_layout() override;
     virtual Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override;
+    virtual Messages::WindowServer::ApplyVirtualDesktopSettingsResponse apply_virtual_desktop_settings(u32, u32, bool) override;
+    virtual Messages::WindowServer::GetVirtualDesktopSettingsResponse get_virtual_desktop_settings() override;
     virtual void show_screen_numbers(bool) override;
     virtual void set_window_cursor(i32, i32) override;
     virtual void set_window_custom_cursor(i32, Gfx::ShareableBitmap const&) override;
@@ -147,6 +150,7 @@ private:
     virtual void set_window_progress(i32, Optional<i32> const&) override;
     virtual void refresh_system_theme() override;
     virtual void pong() override;
+    virtual void set_global_cursor_position(Gfx::IntPoint const&) override;
     virtual Messages::WindowServer::GetGlobalCursorPositionResponse get_global_cursor_position() override;
     virtual void set_mouse_acceleration(float) override;
     virtual Messages::WindowServer::GetMouseAccelerationResponse get_mouse_acceleration() override;
@@ -159,6 +163,7 @@ private:
     virtual void set_window_modified(i32, bool) override;
     virtual Messages::WindowServer::IsWindowModifiedResponse is_window_modified(i32) override;
     virtual Messages::WindowServer::GetDesktopDisplayScaleResponse get_desktop_display_scale(u32) override;
+    virtual void set_flash_flush(bool) override;
 
     Window* window_from_id(i32 window_id);
 

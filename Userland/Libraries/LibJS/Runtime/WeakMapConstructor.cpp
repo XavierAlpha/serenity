@@ -24,9 +24,9 @@ void WeakMapConstructor::initialize(GlobalObject& global_object)
     NativeFunction::initialize(global_object);
 
     // 24.3.2.1 WeakMap.prototype, https://tc39.es/ecma262/#sec-weakmap.prototype
-    define_property(vm.names.prototype, global_object.weak_map_prototype(), 0);
+    define_direct_property(vm.names.prototype, global_object.weak_map_prototype(), 0);
 
-    define_property(vm.names.length, Value(0), Attribute::Configurable);
+    define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
 }
 
 WeakMapConstructor::~WeakMapConstructor()
@@ -68,10 +68,10 @@ Value WeakMapConstructor::construct(FunctionObject& new_target)
             vm.throw_exception<TypeError>(global_object, ErrorType::NotAnObject, String::formatted("Iterator value {}", iterator_value.to_string_without_side_effects()));
             return IterationDecision::Break;
         }
-        auto key = iterator_value.as_object().get(0).value_or(js_undefined());
+        auto key = iterator_value.as_object().get(0);
         if (vm.exception())
             return IterationDecision::Break;
-        auto value = iterator_value.as_object().get(1).value_or(js_undefined());
+        auto value = iterator_value.as_object().get(1);
         if (vm.exception())
             return IterationDecision::Break;
         (void)vm.call(adder.as_function(), Value(weak_map), key, value);

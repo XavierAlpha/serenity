@@ -62,7 +62,7 @@
 #include <LibGUI/Window.h>
 #include <LibGfx/FontDatabase.h>
 #include <LibGfx/Palette.h>
-#include <LibThreading/Lock.h>
+#include <LibThreading/Mutex.h>
 #include <LibThreading/Thread.h>
 #include <LibVT/TerminalWidget.h>
 #include <fcntl.h>
@@ -160,7 +160,7 @@ void HackStudioWidget::update_actions()
         auto widget = m_action_tab_widget->active_widget();
         if (!widget)
             return false;
-        if (StringView { "TerminalWrapper" } != widget->class_name())
+        if ("TerminalWrapper"sv != widget->class_name())
             return false;
         if (!reinterpret_cast<TerminalWrapper*>(widget)->user_spawned())
             return false;
@@ -268,11 +268,7 @@ bool HackStudioWidget::open_file(const String& full_filename)
     current_editor().vertical_scrollbar().set_value(new_project_file->vertical_scroll_value());
     current_editor().set_editing_engine(make<GUI::RegularEditingEngine>());
 
-    if (filename.ends_with(".frm")) {
-        set_edit_mode(EditMode::Form);
-    } else {
-        set_edit_mode(EditMode::Text);
-    }
+    set_edit_mode(EditMode::Text);
 
     String relative_file_path = filename;
     if (filename.starts_with(m_project->root_path()))
@@ -302,8 +298,6 @@ void HackStudioWidget::set_edit_mode(EditMode mode)
 {
     if (mode == EditMode::Text) {
         m_right_hand_stack->set_active_widget(m_editors_splitter);
-    } else if (mode == EditMode::Form) {
-        m_right_hand_stack->set_active_widget(m_form_inner_container);
     } else if (mode == EditMode::Diff) {
         m_right_hand_stack->set_active_widget(m_diff_viewer);
     } else {
@@ -510,7 +504,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_switch_to_next_editor_action
         if (m_all_editor_wrappers.size() <= 1)
             return;
         Vector<EditorWrapper&> wrappers;
-        m_editors_splitter->for_each_child_of_type<EditorWrapper>([this, &wrappers](auto& child) {
+        m_editors_splitter->for_each_child_of_type<EditorWrapper>([&wrappers](auto& child) {
             wrappers.append(child);
             return IterationDecision::Continue;
         });
@@ -531,7 +525,7 @@ NonnullRefPtr<GUI::Action> HackStudioWidget::create_switch_to_previous_editor_ac
         if (m_all_editor_wrappers.size() <= 1)
             return;
         Vector<EditorWrapper&> wrappers;
-        m_editors_splitter->for_each_child_of_type<EditorWrapper>([this, &wrappers](auto& child) {
+        m_editors_splitter->for_each_child_of_type<EditorWrapper>([&wrappers](auto& child) {
             wrappers.append(child);
             return IterationDecision::Continue;
         });

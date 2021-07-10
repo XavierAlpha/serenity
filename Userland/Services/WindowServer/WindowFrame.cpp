@@ -164,7 +164,7 @@ void WindowFrame::reload_config()
 
 MultiScaleBitmaps* WindowFrame::shadow_bitmap() const
 {
-    if (m_window.is_frameless())
+    if (m_window.is_frameless() && !m_window.has_forced_shadow())
         return nullptr;
     switch (m_window.type()) {
     case WindowType::Desktop:
@@ -585,38 +585,25 @@ void WindowFrame::invalidate()
     m_window.invalidate(true, true);
 }
 
+void WindowFrame::invalidate_menubar()
+{
+    invalidate(menubar_rect());
+}
+
 void WindowFrame::invalidate(Gfx::IntRect relative_rect)
 {
     auto frame_rect = rect();
     auto window_rect = m_window.rect();
     relative_rect.translate_by(frame_rect.x() - window_rect.x(), frame_rect.y() - window_rect.y());
     set_dirty();
-    m_window.invalidate(relative_rect, true);
+    m_window.invalidate(relative_rect);
 }
 
 void WindowFrame::window_rect_changed(const Gfx::IntRect& old_rect, const Gfx::IntRect& new_rect)
 {
     layout_buttons();
 
-    auto new_frame_rect = constrained_render_rect_to_screen(frame_rect_for_window(m_window, new_rect));
     set_dirty(true);
-    auto& compositor = Compositor::the();
-
-    {
-        // Invalidate the areas outside of the new rect. Use the last computed occlusions for this purpose
-        // as we can't reliably calculate the previous frame rect anymore. The window state (e.g. maximized
-        // or tiled) may affect the calculations and it may have already been changed by the time we get
-        // called here.
-        auto invalidate_opaque = m_window.opaque_rects().shatter(new_frame_rect);
-        for (auto& rect : invalidate_opaque.rects())
-            compositor.invalidate_screen(rect);
-        auto invalidate_transparent = m_window.transparency_rects().shatter(new_frame_rect);
-        for (auto& rect : invalidate_transparent.rects())
-            compositor.invalidate_screen(rect);
-    }
-
-    compositor.invalidate_occlusions();
-
     WindowManager::the().notify_rect_changed(m_window, old_rect, new_rect);
 }
 

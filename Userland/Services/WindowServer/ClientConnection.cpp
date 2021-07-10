@@ -53,7 +53,8 @@ ClientConnection::ClientConnection(NonnullRefPtr<Core::LocalSocket> client_socke
         s_connections = new HashMap<int, NonnullRefPtr<ClientConnection>>;
     s_connections->set(client_id, *this);
 
-    async_fast_greet(Screen::rects(), Screen::main().index(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query());
+    auto& wm = WindowManager::the();
+    async_fast_greet(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns(), Gfx::current_system_theme_buffer(), Gfx::FontDatabase::default_font_query(), Gfx::FontDatabase::fixed_width_font_query());
 }
 
 ClientConnection::~ClientConnection()
@@ -84,9 +85,10 @@ void ClientConnection::die()
     });
 }
 
-void ClientConnection::notify_about_new_screen_rects(Vector<Gfx::IntRect, 4> const& rects, size_t main_screen_index)
+void ClientConnection::notify_about_new_screen_rects()
 {
-    async_screen_rects_changed(rects, main_screen_index);
+    auto& wm = WindowManager::the();
+    async_screen_rects_changed(Screen::rects(), Screen::main().index(), wm.window_stack_rows(), wm.window_stack_columns());
 }
 
 void ClientConnection::create_menubar(i32 menubar_id)
@@ -272,6 +274,18 @@ void ClientConnection::set_frameless(i32 window_id, bool frameless)
     WindowManager::the().tell_wms_window_state_changed(*it->value);
 }
 
+void ClientConnection::set_forced_shadow(i32 window_id, bool shadow)
+{
+    auto it = m_windows.find(window_id);
+    if (it == m_windows.end()) {
+        did_misbehave("SetForcedShadow: Bad window ID");
+        return;
+    }
+    it->value->set_forced_shadow(shadow);
+    it->value->invalidate();
+    Compositor::the().invalidate_occlusions();
+}
+
 void ClientConnection::set_window_opacity(i32 window_id, float opacity)
 {
     auto it = m_windows.find(window_id);
@@ -321,6 +335,20 @@ Messages::WindowServer::SaveScreenLayoutResponse ClientConnection::save_screen_l
     String error_msg;
     bool success = WindowManager::the().save_screen_layout(error_msg);
     return { success, move(error_msg) };
+}
+
+Messages::WindowServer::ApplyVirtualDesktopSettingsResponse ClientConnection::apply_virtual_desktop_settings(u32 rows, u32 columns, bool save)
+{
+    if (rows == 0 || columns == 0 || rows > WindowManager::max_window_stack_rows || columns > WindowManager::max_window_stack_columns)
+        return { false };
+
+    return { WindowManager::the().apply_virtual_desktop_settings(rows, columns, save) };
+}
+
+Messages::WindowServer::GetVirtualDesktopSettingsResponse ClientConnection::get_virtual_desktop_settings()
+{
+    auto& wm = WindowManager::the();
+    return { (unsigned)wm.window_stack_rows(), (unsigned)wm.window_stack_columns(), WindowManager::max_window_stack_rows, WindowManager::max_window_stack_columns };
 }
 
 void ClientConnection::show_screen_numbers(bool show)
@@ -494,10 +522,10 @@ Window* ClientConnection::window_from_id(i32 window_id)
 
 void ClientConnection::create_window(i32 window_id, Gfx::IntRect const& rect,
     bool auto_position, bool has_alpha_channel, bool modal, bool minimizable, bool resizable,
-    bool fullscreen, bool frameless, bool accessory, float opacity, float alpha_hit_threshold,
-    Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment, Gfx::IntSize const& minimum_size,
-    Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type, String const& title, i32 parent_window_id,
-    Gfx::IntRect const& launch_origin_rect)
+    bool fullscreen, bool frameless, bool forced_shadow, bool accessory, float opacity,
+    float alpha_hit_threshold, Gfx::IntSize const& base_size, Gfx::IntSize const& size_increment,
+    Gfx::IntSize const& minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type,
+    String const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
 {
     Window* parent_window = nullptr;
     if (parent_window_id) {
@@ -519,6 +547,8 @@ void ClientConnection::create_window(i32 window_id, Gfx::IntRect const& rect,
     }
 
     auto window = Window::construct(*this, (WindowType)type, window_id, modal, minimizable, frameless, resizable, fullscreen, accessory, parent_window);
+
+    window->set_forced_shadow(forced_shadow);
 
     if (!launch_origin_rect.is_empty())
         window->start_launch_animation(launch_origin_rect);
@@ -652,7 +682,7 @@ void ClientConnection::set_window_backing_store(i32 window_id, [[maybe_unused]] 
         }
         auto backing_store = Gfx::Bitmap::create_with_anonymous_buffer(
             has_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888,
-            buffer,
+            move(buffer),
             size,
             1,
             {});
@@ -864,6 +894,18 @@ void ClientConnection::pong()
     set_unresponsive(false);
 }
 
+void ClientConnection::set_global_cursor_position(Gfx::IntPoint const& position)
+{
+    if (!Screen::main().rect().contains(position)) {
+        did_misbehave("SetGlobalCursorPosition with bad position");
+        return;
+    }
+    if (position != ScreenInput::the().cursor_location()) {
+        ScreenInput::the().set_cursor_location(position);
+        Compositor::the().invalidate_cursor();
+    }
+}
+
 Messages::WindowServer::GetGlobalCursorPositionResponse ClientConnection::get_global_cursor_position()
 {
     return ScreenInput::the().cursor_location();
@@ -1004,7 +1046,6 @@ Messages::WindowServer::GetScreenBitmapAroundCursorResponse ClientConnection::ge
     if (auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, rect.size(), 1)) {
         auto bounding_screen_src_rect = Screen::bounding_rect().intersected(rect);
         Gfx::Painter painter(*bitmap);
-        Gfx::IntRect last_cursor_rect;
         auto& screen_with_cursor = ScreenInput::the().cursor_location_screen();
         auto cursor_rect = Compositor::the().current_cursor_rect();
         Screen::for_each([&](auto& screen) {
@@ -1067,6 +1108,11 @@ void ClientConnection::set_window_modified(i32 window_id, bool modified)
     }
     auto& window = *it->value;
     window.set_modified(modified);
+}
+
+void ClientConnection::set_flash_flush(bool enabled)
+{
+    Compositor::the().set_flash_flush(enabled);
 }
 
 }

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/FlyString.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibWeb/Bindings/NavigatorObject.h>
@@ -21,25 +20,27 @@ NavigatorObject::NavigatorObject(JS::GlobalObject& global_object)
 void NavigatorObject::initialize(JS::GlobalObject& global_object)
 {
     auto& heap = this->heap();
-    auto* languages = JS::Array::create(global_object);
+    auto* languages = JS::Array::create(global_object, 0);
     languages->indexed_properties().append(js_string(heap, "en-US"));
 
-    define_property("appCodeName", js_string(heap, "Mozilla"));
-    define_property("appName", js_string(heap, "Netscape"));
-    define_property("appVersion", js_string(heap, "4.0"));
-    define_property("language", languages->get(0));
-    define_property("languages", languages);
-    define_property("platform", js_string(heap, "SerenityOS"));
-    define_property("product", js_string(heap, "Gecko"));
+    // FIXME: All of these should be in Navigator's prototype and be native accessors
+    u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
+    define_direct_property("appCodeName", js_string(heap, "Mozilla"), attr);
+    define_direct_property("appName", js_string(heap, "Netscape"), attr);
+    define_direct_property("appVersion", js_string(heap, "4.0"), attr);
+    define_direct_property("language", languages->get(0), attr);
+    define_direct_property("languages", languages, attr);
+    define_direct_property("platform", js_string(heap, "SerenityOS"), attr);
+    define_direct_property("product", js_string(heap, "Gecko"), attr);
 
-    define_native_property("userAgent", user_agent_getter, nullptr);
+    define_native_accessor("userAgent", user_agent_getter, {}, JS::Attribute::Configurable | JS::Attribute::Enumerable);
 }
 
 NavigatorObject::~NavigatorObject()
 {
 }
 
-JS_DEFINE_NATIVE_GETTER(NavigatorObject::user_agent_getter)
+JS_DEFINE_NATIVE_FUNCTION(NavigatorObject::user_agent_getter)
 {
     return JS::js_string(vm, ResourceLoader::the().user_agent());
 }

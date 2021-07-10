@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/LexicalPath.h>
 #include <AK/ScopeGuard.h>
 #include <AK/TemporaryChange.h>
 #include <AK/WeakPtr.h>
@@ -148,10 +147,10 @@ static KResultOr<FlatPtr> make_userspace_context_for_main_thread([[maybe_unused]
     regs.rsi = argv;
     regs.rdx = envp;
 #endif
-    push_on_new_stack(0); // return address
 
-    VERIFY((new_sp + sizeof(void*)) % 16 == 0);
+    VERIFY(new_sp % 16 == 0);
 
+    // FIXME: The way we're setting up the stack and passing arguments to the entry point isn't ABI-compliant
     return new_sp;
 }
 
@@ -388,7 +387,10 @@ static KResultOr<LoadResult> load_elf_object(NonnullOwnPtr<Space> new_space, Fil
             prot |= PROT_WRITE;
         if (program_header.is_executable())
             prot |= PROT_EXEC;
-        auto range = new_space->allocate_range(program_header.vaddr().offset(load_offset), program_header.size_in_memory());
+
+        auto range_base = VirtualAddress { page_round_down(program_header.vaddr().offset(load_offset).get()) };
+        auto range_end = VirtualAddress { page_round_up(program_header.vaddr().offset(load_offset).offset(program_header.size_in_memory()).get()) };
+        auto range = new_space->allocate_range(range_base, range_end.get() - range_base.get());
         if (!range.has_value()) {
             ph_load_result = ENOMEM;
             return IterationDecision::Break;
@@ -760,7 +762,7 @@ KResultOr<RefPtr<FileDescription>> Process::find_elf_interpreter_for_executable(
 
     if (!interpreter_path.is_empty()) {
         dbgln_if(EXEC_DEBUG, "exec({}): Using program interpreter {}", path, interpreter_path);
-        auto interp_result = VFS::the().open(interpreter_path, O_EXEC, 0, current_directory());
+        auto interp_result = VirtualFileSystem::the().open(interpreter_path, O_EXEC, 0, current_directory());
         if (interp_result.is_error()) {
             dbgln("exec({}): Unable to open program interpreter {}", path, interpreter_path);
             return interp_result.error();
@@ -836,7 +838,7 @@ KResult Process::exec(String path, Vector<String> arguments, Vector<String> envi
     //        * ET_EXEC binary that just gets loaded
     //        * ET_DYN binary that requires a program interpreter
     //
-    auto file_or_error = VFS::the().open(path, O_EXEC, 0, current_directory());
+    auto file_or_error = VirtualFileSystem::the().open(path, O_EXEC, 0, current_directory());
     if (file_or_error.is_error())
         return file_or_error.error();
     auto description = file_or_error.release_value();
@@ -942,14 +944,14 @@ KResultOr<FlatPtr> Process::sys$execve(Userspace<const Syscall::SC_execve_params
     auto copy_user_strings = [](const auto& list, auto& output) {
         if (!list.length)
             return true;
-        Checked size = sizeof(*list.strings);
+        Checked<size_t> size = sizeof(*list.strings);
         size *= list.length;
         if (size.has_overflow())
             return false;
         Vector<Syscall::StringArgument, 32> strings;
         if (!strings.try_resize(list.length))
             return false;
-        if (!copy_from_user(strings.data(), list.strings, list.length * sizeof(*list.strings)))
+        if (!copy_from_user(strings.data(), list.strings, size.value()))
             return false;
         for (size_t i = 0; i < list.length; ++i) {
             auto string = copy_string_from_user(strings[i]);

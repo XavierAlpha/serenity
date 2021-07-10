@@ -21,6 +21,9 @@ public:
     NonnullRefPtr<DOM::DocumentFragment> content() { return *m_content; }
     const NonnullRefPtr<DOM::DocumentFragment> content() const { return *m_content; }
 
+    virtual void adopted_from(DOM::Document&) override;
+    virtual void cloned(Node& copy, bool clone_children) override;
+
 private:
     DOM::Document& appropriate_template_contents_owner_document(DOM::Document&);
 

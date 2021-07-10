@@ -16,16 +16,17 @@
 #include <LibGUI/Painter.h>
 #include <LibGUI/TextBox.h>
 #include <LibGfx/Palette.h>
-#include <LibThreading/Lock.h>
+#include <LibThreading/Mutex.h>
+#include <unistd.h>
 
 namespace Assistant {
 
 struct AppState {
     Optional<size_t> selected_index;
-    Vector<NonnullRefPtr<Result>> results;
+    NonnullRefPtrVector<Result> results;
     size_t visible_result_count { 0 };
 
-    Threading::Lock lock;
+    Threading::Mutex lock;
     String last_query;
 };
 
@@ -120,31 +121,29 @@ public:
     explicit Database(AppState& state)
         : m_state(state)
     {
-        m_file_provider.build_filesystem_cache();
+        m_providers.append(make<AppProvider>());
+        m_providers.append(make<CalculatorProvider>());
+        m_providers.append(make<FileProvider>());
+        m_providers.append(make<TerminalProvider>());
+        m_providers.append(make<URLProvider>());
     }
 
-    Function<void(Vector<NonnullRefPtr<Result>>)> on_new_results;
+    Function<void(NonnullRefPtrVector<Result>)> on_new_results;
 
     void search(String const& query)
     {
-        m_file_provider.query(query, [=, this](auto results) {
-            recv_results(query, results);
-        });
-
-        m_app_provider.query(query, [=, this](auto results) {
-            recv_results(query, results);
-        });
-
-        m_calculator_provider.query(query, [=, this](auto results) {
-            recv_results(query, results);
-        });
+        for (auto& provider : m_providers) {
+            provider.query(query, [=, this](auto results) {
+                did_receive_results(query, results);
+            });
+        }
     }
 
 private:
-    void recv_results(String const& query, Vector<NonnullRefPtr<Result>> const& results)
+    void did_receive_results(String const& query, NonnullRefPtrVector<Result> const& results)
     {
         {
-            Threading::Locker db_locker(m_lock);
+            Threading::MutexLocker db_locker(m_mutex);
             auto it = m_result_cache.find(query);
             if (it == m_result_cache.end()) {
                 m_result_cache.set(query, {});
@@ -152,8 +151,8 @@ private:
             it = m_result_cache.find(query);
 
             for (auto& result : results) {
-                auto found = it->value.find_if([result](auto& other) {
-                    return result->equals(other);
+                auto found = it->value.find_if([&result](auto& other) {
+                    return result.equals(other);
                 });
 
                 if (found.is_end())
@@ -161,12 +160,17 @@ private:
             }
         }
 
-        Threading::Locker state_locker(m_state.lock);
+        Threading::MutexLocker state_locker(m_state.lock);
         auto new_results = m_result_cache.find(m_state.last_query);
         if (new_results == m_result_cache.end())
             return;
 
-        dual_pivot_quick_sort(new_results->value, 0, static_cast<int>(new_results->value.size() - 1), [](auto& a, auto& b) {
+        // NonnullRefPtrVector will provide dual_pivot_quick_sort references rather than pointers,
+        // and dual_pivot_quick_sort requires being able to construct the underlying type on the
+        // stack. Assistant::Result is pure virtual, thus cannot be constructed on the stack.
+        auto& sortable_results = static_cast<Vector<NonnullRefPtr<Result>>&>(new_results->value);
+
+        dual_pivot_quick_sort(sortable_results, 0, static_cast<int>(sortable_results.size() - 1), [](auto& a, auto& b) {
             return a->score() > b->score();
         });
 
@@ -175,12 +179,10 @@ private:
 
     AppState& m_state;
 
-    AppProvider m_app_provider;
-    CalculatorProvider m_calculator_provider;
-    FileProvider m_file_provider;
+    NonnullOwnPtrVector<Provider> m_providers;
 
-    Threading::Lock m_lock;
-    HashMap<String, Vector<NonnullRefPtr<Result>>> m_result_cache;
+    Threading::Mutex m_mutex;
+    HashMap<String, NonnullRefPtrVector<Result>> m_result_cache;
 };
 
 }
@@ -196,12 +198,14 @@ int main(int argc, char** argv)
 
     auto app = GUI::Application::construct(argc, argv);
     auto window = GUI::Window::construct();
+    window->set_minimizable(false);
 
     Assistant::AppState app_state;
     Assistant::Database db { app_state };
 
-    auto& container = window->set_main_widget<GUI::Widget>();
+    auto& container = window->set_main_widget<GUI::Frame>();
     container.set_fill_with_background_color(true);
+    container.set_frame_shadow(Gfx::FrameShadow::Raised);
     auto& layout = container.set_layout<GUI::VerticalBoxLayout>();
     layout.set_margins({ 8, 8, 8, 0 });
 
@@ -219,7 +223,7 @@ int main(int argc, char** argv)
 
     text_box.on_change = [&]() {
         {
-            Threading::Locker locker(app_state.lock);
+            Threading::MutexLocker locker(app_state.lock);
             if (app_state.last_query == text_box.text())
                 return;
 
@@ -231,7 +235,7 @@ int main(int argc, char** argv)
     text_box.on_return_pressed = [&]() {
         if (!app_state.selected_index.has_value())
             return;
-        app_state.results[app_state.selected_index.value()]->activate();
+        app_state.results[app_state.selected_index.value()].activate();
         exit(0);
     };
     text_box.on_up_pressed = [&]() {
@@ -273,13 +277,13 @@ int main(int argc, char** argv)
         results_container.remove_all_children();
 
         for (size_t i = 0; i < app_state.visible_result_count; ++i) {
-            auto result = app_state.results[i];
+            auto& result = app_state.results[i];
             auto& match = results_container.add<Assistant::ResultRow>();
-            match.set_image(result->bitmap());
-            match.set_title(result->title());
-            match.set_subtitle(result->subtitle());
-            match.on_selected = [result_copy = result]() {
-                result_copy->activate();
+            match.set_image(result.bitmap());
+            match.set_title(result.title());
+            match.set_subtitle(result.subtitle());
+            match.on_selected = [&result]() {
+                result.activate();
                 exit(0);
             };
         }
@@ -291,6 +295,7 @@ int main(int argc, char** argv)
     };
 
     window->set_frameless(true);
+    window->set_forced_shadow(true);
     window->resize(GUI::Desktop::the().rect().width() / 3, 46);
     window->center_on_screen();
     window->move_to(window->x(), window->y() - (GUI::Desktop::the().rect().height() * 0.33));

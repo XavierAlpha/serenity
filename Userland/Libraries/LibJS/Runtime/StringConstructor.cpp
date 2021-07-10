@@ -26,14 +26,14 @@ void StringConstructor::initialize(GlobalObject& global_object)
     NativeFunction::initialize(global_object);
 
     // 22.1.2.3 String.prototype, https://tc39.es/ecma262/#sec-string.prototype
-    define_property(vm.names.prototype, global_object.string_prototype(), 0);
-
-    define_property(vm.names.length, Value(1), Attribute::Configurable);
+    define_direct_property(vm.names.prototype, global_object.string_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(vm.names.raw, raw, 1, attr);
     define_native_function(vm.names.fromCharCode, from_char_code, 1, attr);
     define_native_function(vm.names.fromCodePoint, from_code_point, 1, attr);
+
+    define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 }
 
 StringConstructor::~StringConstructor()
@@ -78,7 +78,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringConstructor::raw)
     if (vm.exception())
         return {};
 
-    auto raw_value = cooked->get(vm.names.raw).value_or(js_undefined());
+    auto raw_value = cooked->get(vm.names.raw);
     if (vm.exception())
         return {};
 
@@ -98,7 +98,7 @@ JS_DEFINE_NATIVE_FUNCTION(StringConstructor::raw)
     StringBuilder builder;
     for (size_t i = 0; i < literal_segments; ++i) {
         auto next_key = String::number(i);
-        auto next_segment_value = raw->get(next_key).value_or(js_undefined());
+        auto next_segment_value = raw->get(next_key);
         if (vm.exception())
             return {};
         auto next_segment = next_segment_value.to_string(global_object);

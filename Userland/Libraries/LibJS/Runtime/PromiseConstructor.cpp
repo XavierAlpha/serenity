@@ -26,9 +26,7 @@ void PromiseConstructor::initialize(GlobalObject& global_object)
     NativeFunction::initialize(global_object);
 
     // 27.2.4.4 Promise.prototype, https://tc39.es/ecma262/#sec-promise.prototype
-    define_property(vm.names.prototype, global_object.promise_prototype(), 0);
-
-    define_property(vm.names.length, Value(1), Attribute::Configurable);
+    define_direct_property(vm.names.prototype, global_object.promise_prototype(), 0);
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     // TODO: Implement these functions below and uncomment this.
@@ -40,6 +38,8 @@ void PromiseConstructor::initialize(GlobalObject& global_object)
     define_native_function(vm.names.resolve, resolve, 1, attr);
 
     define_native_accessor(*vm.well_known_symbol_species(), symbol_species_getter, {}, Attribute::Configurable);
+
+    define_direct_property(vm.names.length, Value(1), Attribute::Configurable);
 }
 
 // 27.2.3.1 Promise ( executor ), https://tc39.es/ecma262/#sec-promise-executor
@@ -68,11 +68,11 @@ Value PromiseConstructor::construct(FunctionObject& new_target)
 
     auto [resolve_function, reject_function] = promise->create_resolving_functions();
 
-    auto completion_value = vm.call(executor.as_function(), js_undefined(), &resolve_function, &reject_function);
-    if (vm.exception()) {
+    (void)vm.call(executor.as_function(), js_undefined(), &resolve_function, &reject_function);
+    if (auto* exception = vm.exception()) {
         vm.clear_exception();
         vm.stop_unwind();
-        [[maybe_unused]] auto result = vm.call(reject_function, js_undefined(), completion_value);
+        (void)vm.call(reject_function, js_undefined(), exception->value());
     }
     return promise;
 }

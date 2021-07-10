@@ -318,6 +318,13 @@ void Widget::handle_keydown_event(KeyEvent& event)
 void Widget::handle_paint_event(PaintEvent& event)
 {
     VERIFY(is_visible());
+
+    if (!rect().intersects(event.rect())) {
+        // This widget is not inside the paint event rect.
+        // Since widgets fully contain their children, we don't need to recurse further.
+        return;
+    }
+
     if (fill_with_background_color()) {
         Painter painter(*this);
         painter.fill_rect(event.rect(), palette().color(background_role()));
@@ -1112,6 +1119,11 @@ void Widget::set_shrink_to_fit(bool b)
 bool Widget::has_pending_drop() const
 {
     return Application::the()->pending_drop_widget() == this;
+}
+
+bool Widget::is_visible_for_timer_purposes() const
+{
+    return is_visible();
 }
 
 }

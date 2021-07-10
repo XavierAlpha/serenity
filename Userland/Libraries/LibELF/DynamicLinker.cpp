@@ -41,6 +41,8 @@ using LibCExitFunction = void (*)(int);
 using DlIteratePhdrCallbackFunction = int (*)(struct dl_phdr_info*, size_t, void*);
 using DlIteratePhdrFunction = int (*)(DlIteratePhdrCallbackFunction, void*);
 
+extern "C" [[noreturn]] void _invoke_entry(int argc, char** argv, char** envp, EntryPointFunction entry);
+
 static size_t s_current_tls_offset = 0;
 static size_t s_total_tls_size = 0;
 static size_t s_allocated_tls_block_size = 0;
@@ -91,8 +93,8 @@ static Result<NonnullRefPtr<DynamicLoader>, DlErrorMessage> map_library(const St
 
     s_loaders.set(get_library_name(filename), *loader);
 
+    s_current_tls_offset -= loader->tls_size_of_current_object();
     loader->set_tls_offset(s_current_tls_offset);
-    s_current_tls_offset += loader->tls_size_of_current_object();
 
     return loader;
 }
@@ -301,8 +303,11 @@ static Result<NonnullRefPtr<DynamicLoader>, DlErrorMessage> load_main_library(co
         auto& object = result.value();
 
         if (loader.filename() == "libsystem.so"sv) {
-            if (syscall(SC_msyscall, object->base_address().as_ptr())) {
-                VERIFY_NOT_REACHED();
+            VERIFY(!loader.text_segments().is_empty());
+            for (const auto& segment : loader.text_segments()) {
+                if (syscall(SC_msyscall, segment.address().get())) {
+                    VERIFY_NOT_REACHED();
+                }
             }
         }
 
@@ -547,14 +552,8 @@ void ELF::DynamicLinker::linker_main(String&& main_program_name, int main_progra
     if (s_do_breakpoint_trap_before_entry) {
         asm("int3");
     }
-    rc = entry_point_function(argc, argv, envp);
-    dbgln_if(DYNAMIC_LOAD_DEBUG, "rc: {}", rc);
-    if (s_libc_exit != nullptr) {
-        s_libc_exit(rc);
-    } else {
-        _exit(rc);
-    }
 
+    _invoke_entry(argc, argv, envp, entry_point_function);
     VERIFY_NOT_REACHED();
 }
 

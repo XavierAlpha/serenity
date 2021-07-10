@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2020-2021, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -50,6 +51,12 @@ ObjectPrototype::~ObjectPrototype()
 {
 }
 
+// 10.4.7.1 [[SetPrototypeOf]] ( V ), https://tc39.es/ecma262/#sec-immutable-prototype-exotic-objects-setprototypeof-v
+bool ObjectPrototype::internal_set_prototype_of(Object* prototype)
+{
+    return set_immutable_prototype(prototype);
+}
+
 // 20.1.3.2 Object.prototype.hasOwnProperty ( V ), https://tc39.es/ecma262/#sec-object.prototype.hasownproperty
 JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::has_own_property)
 {
@@ -67,39 +74,71 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::to_string)
 {
     auto this_value = vm.this_value(global_object);
 
+    // 1. If the this value is undefined, return "[object Undefined]".
     if (this_value.is_undefined())
         return js_string(vm, "[object Undefined]");
+
+    // 2. If the this value is null, return "[object Null]".
     if (this_value.is_null())
         return js_string(vm, "[object Null]");
 
-    auto* this_object = this_value.to_object(global_object);
-    VERIFY(this_object);
+    // 3. Let O be ! ToObject(this value).
+    auto* object = this_value.to_object(global_object);
+    VERIFY(object);
 
+    // 4. Let isArray be ? IsArray(O).
+    auto is_array = Value(object).is_array(global_object);
+    if (vm.exception())
+        return {};
+
+    String builtin_tag;
+
+    // 5. If isArray is true, let builtinTag be "Array".
+    if (is_array)
+        builtin_tag = "Array";
+    // 6. Else if O has a [[ParameterMap]] internal slot, let builtinTag be "Arguments".
+    else if (object->has_parameter_map())
+        builtin_tag = "Arguments";
+    // 7. Else if O has a [[Call]] internal method, let builtinTag be "Function".
+    else if (object->is_function())
+        builtin_tag = "Function";
+    // 8. Else if O has an [[ErrorData]] internal slot, let builtinTag be "Error".
+    else if (is<Error>(object))
+        builtin_tag = "Error";
+    // 9. Else if O has a [[BooleanData]] internal slot, let builtinTag be "Boolean".
+    else if (is<BooleanObject>(object))
+        builtin_tag = "Boolean";
+    // 10. Else if O has a [[NumberData]] internal slot, let builtinTag be "Number".
+    else if (is<NumberObject>(object))
+        builtin_tag = "Number";
+    // 11. Else if O has a [[StringData]] internal slot, let builtinTag be "String".
+    else if (is<StringObject>(object))
+        builtin_tag = "String";
+    // 12. Else if O has a [[DateValue]] internal slot, let builtinTag be "Date".
+    else if (is<Date>(object))
+        builtin_tag = "Date";
+    // 13. Else if O has a [[RegExpMatcher]] internal slot, let builtinTag be "RegExp".
+    else if (is<RegExpObject>(object))
+        builtin_tag = "RegExp";
+    // 14. Else, let builtinTag be "Object".
+    else
+        builtin_tag = "Object";
+
+    // 15. Let tag be ? Get(O, @@toStringTag).
+    auto to_string_tag = object->get(*vm.well_known_symbol_to_string_tag());
+    if (vm.exception())
+        return {};
+
+    // Optimization: Instead of creating another PrimitiveString from builtin_tag, we separate tag and to_string_tag and add an additional branch to step 16.
     String tag;
-    auto to_string_tag = this_object->get(*vm.well_known_symbol_to_string_tag());
 
-    if (to_string_tag.is_string()) {
+    // 16. If Type(tag) is not String, set tag to builtinTag.
+    if (!to_string_tag.is_string())
+        tag = move(builtin_tag);
+    else
         tag = to_string_tag.as_string().string();
-    } else if (this_object->is_array()) {
-        tag = "Array";
-    } else if (this_object->is_function()) {
-        tag = "Function";
-    } else if (is<Error>(this_object)) {
-        tag = "Error";
-    } else if (is<BooleanObject>(this_object)) {
-        tag = "Boolean";
-    } else if (is<NumberObject>(this_object)) {
-        tag = "Number";
-    } else if (is<StringObject>(this_object)) {
-        tag = "String";
-    } else if (is<Date>(this_object)) {
-        tag = "Date";
-    } else if (is<RegExpObject>(this_object)) {
-        tag = "RegExp";
-    } else {
-        tag = "Object";
-    }
 
+    // 17. Return the string-concatenation of "[object ", tag, and "]".
     return js_string(vm, String::formatted("[object {}]", tag));
 }
 
@@ -109,7 +148,7 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::to_locale_string)
     auto* this_object = vm.this_value(global_object).to_object(global_object);
     if (!this_object)
         return {};
-    return this_object->invoke(vm.names.toString.as_string());
+    return this_object->invoke(vm.names.toString);
 }
 
 // 20.1.3.7 Object.prototype.valueOf ( ), https://tc39.es/ecma262/#sec-object.prototype.valueof
@@ -121,16 +160,23 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::value_of)
 // 20.1.3.4 Object.prototype.propertyIsEnumerable ( V ), https://tc39.es/ecma262/#sec-object.prototype.propertyisenumerable
 JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::property_is_enumerable)
 {
+    // 1. Let P be ? ToPropertyKey(V).
     auto property_key = vm.argument(0).to_property_key(global_object);
     if (vm.exception())
         return {};
+    // 2. Let O be ? ToObject(this value).
     auto* this_object = vm.this_value(global_object).to_object(global_object);
     if (!this_object)
         return {};
-    auto property_descriptor = this_object->get_own_property_descriptor(property_key);
+    // 3. Let desc be ? O.[[GetOwnProperty]](P).
+    auto property_descriptor = this_object->internal_get_own_property(property_key);
+    if (vm.exception())
+        return {};
+    // 4. If desc is undefined, return false.
     if (!property_descriptor.has_value())
         return Value(false);
-    return Value(property_descriptor.value().attributes.is_enumerable());
+    // 5. Return desc.[[Enumerable]].
+    return Value(*property_descriptor->enumerable);
 }
 
 // 20.1.3.3 Object.prototype.isPrototypeOf ( V ), https://tc39.es/ecma262/#sec-object.prototype.isprototypeof
@@ -145,7 +191,7 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::is_prototype_of)
         return {};
 
     for (;;) {
-        object = object->prototype();
+        object = object->internal_get_prototype_of();
         if (!object)
             return Value(false);
         if (same_value(this_object, object))
@@ -166,22 +212,16 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::define_getter)
         return {};
     }
 
+    auto descriptor = PropertyDescriptor { .get = &getter.as_function(), .enumerable = true, .configurable = true };
+
     auto key = vm.argument(0).to_property_key(global_object);
     if (vm.exception())
         return {};
 
-    auto descriptor = Object::create(global_object, global_object.object_prototype());
-    descriptor->define_property(vm.names.get, getter);
-    descriptor->define_property(vm.names.enumerable, Value(true));
-    descriptor->define_property(vm.names.configurable, Value(true));
-
-    auto success = object->define_property(key, *descriptor);
+    object->define_property_or_throw(key, descriptor);
     if (vm.exception())
         return {};
-    if (!success) {
-        vm.throw_exception<TypeError>(global_object, ErrorType::ObjectDefinePropertyReturnedFalse);
-        return {};
-    }
+
     return js_undefined();
 }
 
@@ -198,22 +238,16 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::define_setter)
         return {};
     }
 
+    auto descriptor = PropertyDescriptor { .set = &setter.as_function(), .enumerable = true, .configurable = true };
+
     auto key = vm.argument(0).to_property_key(global_object);
     if (vm.exception())
         return {};
 
-    auto descriptor = Object::create(global_object, global_object.object_prototype());
-    descriptor->define_property(vm.names.set, setter);
-    descriptor->define_property(vm.names.enumerable, Value(true));
-    descriptor->define_property(vm.names.configurable, Value(true));
-
-    auto success = object->define_property(key, *descriptor);
+    object->define_property_or_throw(key, descriptor);
     if (vm.exception())
         return {};
-    if (!success) {
-        vm.throw_exception<TypeError>(global_object, ErrorType::ObjectDefinePropertyReturnedFalse);
-        return {};
-    }
+
     return js_undefined();
 }
 
@@ -229,12 +263,15 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::lookup_getter)
         return {};
 
     while (object) {
-        auto desc = object->get_own_property_descriptor(key);
+        auto desc = object->internal_get_own_property(key);
         if (vm.exception())
             return {};
-        if (desc.has_value())
-            return desc->getter ?: js_undefined();
-        object = object->prototype();
+        if (desc.has_value()) {
+            if (desc->is_accessor_descriptor())
+                return *desc->get ?: js_undefined();
+            return js_undefined();
+        }
+        object = object->internal_get_prototype_of();
         if (vm.exception())
             return {};
     }
@@ -254,12 +291,15 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::lookup_setter)
         return {};
 
     while (object) {
-        auto desc = object->get_own_property_descriptor(key);
+        auto desc = object->internal_get_own_property(key);
         if (vm.exception())
             return {};
-        if (desc.has_value())
-            return desc->setter ?: js_undefined();
-        object = object->prototype();
+        if (desc.has_value()) {
+            if (desc->is_accessor_descriptor())
+                return *desc->set ?: js_undefined();
+            return js_undefined();
+        }
+        object = object->internal_get_prototype_of();
         if (vm.exception())
             return {};
     }
@@ -273,7 +313,7 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::proto_getter)
     auto object = vm.this_value(global_object).to_object(global_object);
     if (vm.exception())
         return {};
-    auto proto = object->prototype();
+    auto proto = object->internal_get_prototype_of();
     if (vm.exception())
         return {};
     return proto;
@@ -293,10 +333,11 @@ JS_DEFINE_NATIVE_FUNCTION(ObjectPrototype::proto_setter)
     if (!object.is_object())
         return js_undefined();
 
-    auto status = object.as_object().set_prototype(proto.is_object() ? &proto.as_object() : nullptr);
+    auto status = object.as_object().internal_set_prototype_of(proto.is_object() ? &proto.as_object() : nullptr);
     if (vm.exception())
         return {};
     if (!status) {
+        // FIXME: Improve/contextualize error message
         vm.throw_exception<TypeError>(global_object, ErrorType::ObjectSetPrototypeOfReturnedFalse);
         return {};
     }

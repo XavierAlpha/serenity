@@ -237,7 +237,7 @@ RegexResult Matcher<Parser>::match(const Vector<RegexStringView> views, Optional
                 break;
             }
 
-            if (!continue_search && !input.regex_options.has_flag_set(AllFlags::Internal_Stateful))
+            if (!continue_search)
                 break;
         }
 
@@ -377,6 +377,9 @@ ALWAYS_INLINE Optional<bool> Matcher<Parser>::execute_low_prio_forks(const Match
     original_state.string_position = 0;
     return false;
 }
+
+template class Matcher<PosixBasicParser>;
+template class Regex<PosixBasicParser>;
 
 template class Matcher<PosixExtendedParser>;
 template class Regex<PosixExtendedParser>;

@@ -26,7 +26,7 @@ static constexpr IntelNativeGraphicsAdapter::PLLMaxSettings G35Limits {
 };
 
 static constexpr u16 supported_models[] {
-    { 0x29c2 }, // Intel G35 Adapter
+    0x29c2, // Intel G35 Adapter
 };
 
 static bool is_supported_model(u16 device_id)
@@ -217,7 +217,7 @@ void IntelNativeGraphicsAdapter::enable_vga_plane()
     VERIFY(m_modeset_lock.is_locked());
 }
 
-static inline const char* convert_register_index_to_string(IntelGraphics::RegisterIndex index)
+[[maybe_unused]] static inline const char* convert_register_index_to_string(IntelGraphics::RegisterIndex index)
 {
     switch (index) {
     case IntelGraphics::RegisterIndex::PipeAConf:

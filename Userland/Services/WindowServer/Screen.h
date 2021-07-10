@@ -147,6 +147,7 @@ public:
 
     bool can_set_buffer() { return m_can_set_buffer; }
     void set_buffer(int index);
+    size_t buffer_offset(int index) const;
 
     int physical_width() const { return width() * scale_factor(); }
     int physical_height() const { return height() * scale_factor(); }
@@ -156,7 +157,7 @@ public:
     int height() const { return m_virtual_rect.height(); }
     int scale_factor() const { return m_info.scale_factor; }
 
-    Gfx::RGBA32* scanline(int y);
+    Gfx::RGBA32* scanline(int buffer_index, int y);
 
     Gfx::IntSize physical_size() const { return { physical_width(), physical_height() }; }
 
@@ -165,7 +166,8 @@ public:
 
     bool can_device_flush_buffers() const { return m_can_device_flush_buffers; }
     void queue_flush_display_rect(Gfx::IntRect const& rect);
-    void flush_display();
+    void flush_display(int buffer_index);
+    void flush_display_front_buffer(int front_buffer_index, Gfx::IntRect&);
 
 private:
     Screen(ScreenLayout::Screen&);
@@ -190,7 +192,8 @@ private:
     static Vector<int, default_scale_factors_in_use_count> s_scale_factors_in_use;
     size_t m_index { 0 };
 
-    size_t m_size_in_bytes;
+    size_t m_size_in_bytes { 0 };
+    size_t m_back_buffer_offset { 0 };
 
     Gfx::RGBA32* m_framebuffer { nullptr };
     bool m_can_set_buffer { false };
@@ -204,9 +207,9 @@ private:
     ScreenLayout::Screen& m_info;
 };
 
-inline Gfx::RGBA32* Screen::scanline(int y)
+inline Gfx::RGBA32* Screen::scanline(int buffer_index, int y)
 {
-    return reinterpret_cast<Gfx::RGBA32*>(((u8*)m_framebuffer) + (y * m_pitch));
+    return reinterpret_cast<Gfx::RGBA32*>(((u8*)m_framebuffer) + buffer_offset(buffer_index) + (y * m_pitch));
 }
 
 }

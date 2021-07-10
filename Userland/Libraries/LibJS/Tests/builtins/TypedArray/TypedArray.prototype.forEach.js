@@ -1,5 +1,6 @@
 const TYPED_ARRAYS = [
     Uint8Array,
+    Uint8ClampedArray,
     Uint16Array,
     Uint32Array,
     Int8Array,
@@ -94,7 +95,7 @@ describe("normal behaviour", () => {
             const typedArray = new T([1n, 2n, 3n]);
             typedArray.forEach((value, index) => {
                 expect(value).toBe(typedArray[index]);
-                expect(index).toBe(parseInt(typedArray[index] - 1n));
+                expect(index).toBe(Number(typedArray[index] - 1n));
             });
         });
     });

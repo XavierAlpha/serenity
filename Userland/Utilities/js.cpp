@@ -41,6 +41,8 @@
 #include <LibJS/Runtime/Set.h>
 #include <LibJS/Runtime/Shape.h>
 #include <LibJS/Runtime/StringObject.h>
+#include <LibJS/Runtime/Temporal/Instant.h>
+#include <LibJS/Runtime/Temporal/TimeZone.h>
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibLine/Editor.h>
@@ -175,7 +177,7 @@ static String read_next_piece()
 
 static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects);
 
-static void print_type(const FlyString& name)
+static void print_type(FlyString const& name)
 {
     out("[\033[36;1m{}\033[0m]", name);
 }
@@ -192,7 +194,7 @@ static void print_array(JS::Array& array, HashTable<JS::Object*>& seen_objects)
     bool first = true;
     for (auto it = array.indexed_properties().begin(false); it != array.indexed_properties().end(); ++it) {
         print_separator(first);
-        auto value = it.value_and_attributes(&array).value;
+        auto value = array.get(it.index());
         // The V8 repl doesn't throw an exception here, and instead just
         // prints 'undefined'. We may choose to replicate that behavior in
         // the future, but for now lets just catch the error
@@ -212,7 +214,7 @@ static void print_object(JS::Object& object, HashTable<JS::Object*>& seen_object
     for (auto& entry : object.indexed_properties()) {
         print_separator(first);
         out("\"\033[33;1m{}\033[0m\": ", entry.index());
-        auto value = entry.value_and_attributes(&object).value;
+        auto value = object.get(entry.index());
         // The V8 repl doesn't throw an exception here, and instead just
         // prints 'undefined'. We may choose to replicate that behavior in
         // the future, but for now lets just catch the error
@@ -234,26 +236,26 @@ static void print_object(JS::Object& object, HashTable<JS::Object*>& seen_object
     out("}}");
 }
 
-static void print_function(const JS::Object& object, HashTable<JS::Object*>&)
+static void print_function(JS::Object const& object, HashTable<JS::Object*>&)
 {
     print_type(object.class_name());
     if (is<JS::OrdinaryFunctionObject>(object))
-        out(" {}", static_cast<const JS::OrdinaryFunctionObject&>(object).name());
+        out(" {}", static_cast<JS::OrdinaryFunctionObject const&>(object).name());
     else if (is<JS::NativeFunction>(object))
-        out(" {}", static_cast<const JS::NativeFunction&>(object).name());
+        out(" {}", static_cast<JS::NativeFunction const&>(object).name());
 }
 
-static void print_date(const JS::Object& object, HashTable<JS::Object*>&)
+static void print_date(JS::Object const& object, HashTable<JS::Object*>&)
 {
     print_type("Date");
-    out(" \033[34;1m{}\033[0m", static_cast<const JS::Date&>(object).string());
+    out(" \033[34;1m{}\033[0m", static_cast<JS::Date const&>(object).string());
 }
 
-static void print_error(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_error(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
     auto name = object.get_without_side_effects(vm->names.name).value_or(JS::js_undefined());
     auto message = object.get_without_side_effects(vm->names.message).value_or(JS::js_undefined());
-    if (name.is_accessor() || name.is_native_property() || message.is_accessor() || message.is_native_property()) {
+    if (name.is_accessor() || message.is_accessor()) {
         print_value(&object, seen_objects);
     } else {
         auto name_string = name.to_string_without_side_effects();
@@ -264,18 +266,18 @@ static void print_error(const JS::Object& object, HashTable<JS::Object*>& seen_o
     }
 }
 
-static void print_regexp_object(const JS::Object& object, HashTable<JS::Object*>&)
+static void print_regexp_object(JS::Object const& object, HashTable<JS::Object*>&)
 {
-    auto& regexp_object = static_cast<const JS::RegExpObject&>(object);
+    auto& regexp_object = static_cast<JS::RegExpObject const&>(object);
     // Use RegExp.prototype.source rather than RegExpObject::pattern() so we get proper escaping
     auto source = regexp_object.get("source").to_primitive_string(object.global_object())->string();
     print_type("RegExp");
     out(" \033[34;1m/{}/{}\033[0m", source, regexp_object.flags());
 }
 
-static void print_proxy_object(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_proxy_object(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& proxy_object = static_cast<const JS::ProxyObject&>(object);
+    auto& proxy_object = static_cast<JS::ProxyObject const&>(object);
     print_type("Proxy");
     out("\n  target: ");
     print_value(&proxy_object.target(), seen_objects);
@@ -283,9 +285,9 @@ static void print_proxy_object(const JS::Object& object, HashTable<JS::Object*>&
     print_value(&proxy_object.handler(), seen_objects);
 }
 
-static void print_map(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_map(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& map = static_cast<const JS::Map&>(object);
+    auto& map = static_cast<JS::Map const&>(object);
     auto& entries = map.entries();
     print_type("Map");
     out(" {{");
@@ -301,9 +303,9 @@ static void print_map(const JS::Object& object, HashTable<JS::Object*>& seen_obj
     out("}}");
 }
 
-static void print_set(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_set(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& set = static_cast<const JS::Set&>(object);
+    auto& set = static_cast<JS::Set const&>(object);
     auto& values = set.values();
     print_type("Set");
     out(" {{");
@@ -317,9 +319,9 @@ static void print_set(const JS::Object& object, HashTable<JS::Object*>& seen_obj
     out("}}");
 }
 
-static void print_promise(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_promise(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& promise = static_cast<const JS::Promise&>(object);
+    auto& promise = static_cast<JS::Promise const&>(object);
     print_type("Promise");
     switch (promise.state()) {
     case JS::Promise::State::Pending:
@@ -343,9 +345,9 @@ static void print_promise(const JS::Object& object, HashTable<JS::Object*>& seen
     }
 }
 
-static void print_array_buffer(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_array_buffer(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& array_buffer = static_cast<const JS::ArrayBuffer&>(object);
+    auto& array_buffer = static_cast<JS::ArrayBuffer const&>(object);
     auto& buffer = array_buffer.buffer();
     auto byte_length = array_buffer.byte_length();
     print_type("ArrayBuffer");
@@ -375,9 +377,10 @@ static void print_number(T number) requires IsArithmetic<T>
     out("\033[0m");
 }
 
-static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_typed_array(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& typed_array_base = static_cast<const JS::TypedArrayBase&>(object);
+    auto& typed_array_base = static_cast<JS::TypedArrayBase const&>(object);
+    auto& array_buffer = *typed_array_base.viewed_array_buffer();
     auto length = typed_array_base.array_length();
     print_type(object.class_name());
     out("\n  length: ");
@@ -386,15 +389,17 @@ static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& 
     print_value(JS::Value(typed_array_base.byte_length()), seen_objects);
     out("\n  buffer: ");
     print_type("ArrayBuffer");
-    out(" @ {:p}", typed_array_base.viewed_array_buffer());
-    if (!length)
+    if (array_buffer.is_detached())
+        out(" (detached)");
+    out(" @ {:p}", &array_buffer);
+    if (!length || array_buffer.is_detached())
         return;
     outln();
     // FIXME: This kinda sucks.
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     if (is<JS::ClassName>(object)) {                                                     \
         out("[ ");                                                                       \
-        auto& typed_array = static_cast<const JS::ClassName&>(typed_array_base);         \
+        auto& typed_array = static_cast<JS::ClassName const&>(typed_array_base);         \
         auto data = typed_array.data();                                                  \
         for (size_t i = 0; i < length; ++i) {                                            \
             if (i > 0)                                                                   \
@@ -409,9 +414,9 @@ static void print_typed_array(const JS::Object& object, HashTable<JS::Object*>& 
     VERIFY_NOT_REACHED();
 }
 
-static void print_data_view(const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_data_view(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
-    auto& data_view = static_cast<const JS::DataView&>(object);
+    auto& data_view = static_cast<JS::DataView const&>(object);
     print_type("DataView");
     out("\n  byteLength: ");
     print_value(JS::Value(data_view.byte_length()), seen_objects);
@@ -422,7 +427,28 @@ static void print_data_view(const JS::Object& object, HashTable<JS::Object*>& se
     out(" @ {:p}", data_view.viewed_array_buffer());
 }
 
-static void print_primitive_wrapper_object(const FlyString& name, const JS::Object& object, HashTable<JS::Object*>& seen_objects)
+static void print_temporal_instant(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& instant = static_cast<JS::Temporal::Instant const&>(object);
+    print_type("Temporal.Instant");
+    // FIXME: Print human readable date and time, like in print_date() - ideally handling arbitrarily large values since we get a bigint.
+    out("\n  nanoseconds: ");
+    print_value(&instant.nanoseconds(), seen_objects);
+}
+
+static void print_temporal_time_zone(JS::Object const& object, HashTable<JS::Object*>& seen_objects)
+{
+    auto& time_zone = static_cast<JS::Temporal::TimeZone const&>(object);
+    print_type("Temporal.TimeZone");
+    out("\n  identifier: ");
+    print_value(JS::js_string(object.vm(), time_zone.identifier()), seen_objects);
+    if (time_zone.offset_nanoseconds().has_value()) {
+        out("\n  offset (ns): ");
+        print_value(JS::Value(*time_zone.offset_nanoseconds()), seen_objects);
+    }
+}
+
+static void print_primitive_wrapper_object(FlyString const& name, JS::Object const& object, HashTable<JS::Object*>& seen_objects)
 {
     // BooleanObject, NumberObject, StringObject
     print_type(name);
@@ -449,7 +475,7 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
 
     if (value.is_object()) {
         auto& object = value.as_object();
-        if (object.is_array())
+        if (is<JS::Array>(object))
             return print_array(static_cast<JS::Array&>(object), seen_objects);
         if (object.is_function())
             return print_function(object, seen_objects);
@@ -479,6 +505,10 @@ static void print_value(JS::Value value, HashTable<JS::Object*>& seen_objects)
             return print_primitive_wrapper_object("Number", object, seen_objects);
         if (is<JS::BooleanObject>(object))
             return print_primitive_wrapper_object("Boolean", object, seen_objects);
+        if (is<JS::Temporal::Instant>(object))
+            return print_temporal_instant(object, seen_objects);
+        if (is<JS::Temporal::TimeZone>(object))
+            return print_temporal_time_zone(object, seen_objects);
         return print_object(object, seen_objects);
     }
 
@@ -509,7 +539,7 @@ static void print(JS::Value value)
     outln();
 }
 
-static bool write_to_file(const String& path)
+static bool write_to_file(String const& path)
 {
     int fd = open(path.characters(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
     for (size_t i = 0; i < repl_statements.size(); i++) {
@@ -535,7 +565,7 @@ static bool write_to_file(const String& path)
     return true;
 }
 
-static bool parse_and_run(JS::Interpreter& interpreter, const StringView& source)
+static bool parse_and_run(JS::Interpreter& interpreter, StringView const& source)
 {
     auto parser = JS::Parser(JS::Lexer(source));
     auto program = parser.parse_program();
@@ -650,11 +680,12 @@ static JS::Value load_file_impl(JS::VM& vm, JS::GlobalObject& global_object)
 void ReplObject::initialize_global_object()
 {
     Base::initialize_global_object();
-    define_property("global", this, JS::Attribute::Enumerable);
-    define_native_function("exit", exit_interpreter);
-    define_native_function("help", repl_help);
-    define_native_function("load", load_file, 1);
-    define_native_function("save", save_to_file, 1);
+    define_direct_property("global", this, JS::Attribute::Enumerable);
+    u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
+    define_native_function("exit", exit_interpreter, 0, attr);
+    define_native_function("help", repl_help, 0, attr);
+    define_native_function("load", load_file, 1, attr);
+    define_native_function("save", save_to_file, 1, attr);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ReplObject::save_to_file)
@@ -697,8 +728,9 @@ JS_DEFINE_NATIVE_FUNCTION(ReplObject::load_file)
 void ScriptObject::initialize_global_object()
 {
     Base::initialize_global_object();
-    define_property("global", this, JS::Attribute::Enumerable);
-    define_native_function("load", load_file, 1);
+    define_direct_property("global", this, JS::Attribute::Enumerable);
+    u8 attr = JS::Attribute::Configurable | JS::Attribute::Writable | JS::Attribute::Enumerable;
+    define_native_function("load", load_file, 1, attr);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(ScriptObject::load_file)
@@ -931,6 +963,7 @@ int main(int argc, char** argv)
                     break;
                 case JS::TokenCategory::Identifier:
                     stylize({ start, end }, { Line::Style::Foreground(Line::Style::XtermColor::White), Line::Style::Bold });
+                    break;
                 default:
                     break;
                 }
@@ -939,7 +972,7 @@ int main(int argc, char** argv)
             editor.set_prompt(prompt_for_level(open_indents));
         };
 
-        auto complete = [&interpreter](const Line::Editor& editor) -> Vector<Line::CompletionSuggestion> {
+        auto complete = [&interpreter](Line::Editor const& editor) -> Vector<Line::CompletionSuggestion> {
             auto line = editor.line(editor.cursor());
 
             JS::Lexer lexer { line };
@@ -1010,8 +1043,8 @@ int main(int argc, char** argv)
 
             Vector<Line::CompletionSuggestion> results;
 
-            Function<void(const JS::Shape&, const StringView&)> list_all_properties = [&results, &list_all_properties](const JS::Shape& shape, auto& property_pattern) {
-                for (const auto& descriptor : shape.property_table()) {
+            Function<void(JS::Shape const&, StringView const&)> list_all_properties = [&results, &list_all_properties](JS::Shape const& shape, auto& property_pattern) {
+                for (auto const& descriptor : shape.property_table()) {
                     if (!descriptor.key.is_string())
                         continue;
                     auto key = descriptor.key.as_string();
@@ -1022,7 +1055,7 @@ int main(int argc, char** argv)
                         }
                     }
                 }
-                if (const auto* prototype = shape.prototype()) {
+                if (auto const* prototype = shape.prototype()) {
                     list_all_properties(prototype->shape(), property_pattern);
                 }
             };
@@ -1040,15 +1073,15 @@ int main(int argc, char** argv)
                 if (!variable.is_object())
                     break;
 
-                const auto* object = variable.to_object(interpreter->global_object());
-                const auto& shape = object->shape();
+                auto const* object = variable.to_object(interpreter->global_object());
+                auto const& shape = object->shape();
                 list_all_properties(shape, property_name);
                 if (results.size())
                     editor.suggest(property_name.length());
                 break;
             }
             case CompleteVariable: {
-                const auto& variable = interpreter->global_object();
+                auto const& variable = interpreter->global_object();
                 list_all_properties(variable.shape(), variable_name);
                 if (results.size())
                     editor.suggest(variable_name.length());

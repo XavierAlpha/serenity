@@ -53,9 +53,6 @@ set(KERNEL_SOURCES
     Devices/RandomDevice.cpp
     Devices/SB16.cpp
     Devices/SerialDevice.cpp
-    VirtIO/VirtIO.cpp
-    VirtIO/VirtIOQueue.cpp
-    VirtIO/VirtIOConsole.cpp
     Devices/VMWareBackdoor.cpp
     Devices/ZeroDevice.cpp
     Devices/HID/I8042Controller.cpp
@@ -112,9 +109,11 @@ set(KERNEL_SOURCES
     FileSystem/Inode.cpp
     FileSystem/InodeFile.cpp
     FileSystem/InodeWatcher.cpp
+    FileSystem/Mount.cpp
     FileSystem/Plan9FileSystem.cpp
     FileSystem/ProcFS.cpp
     FileSystem/SysFS.cpp
+    FileSystem/SysFSComponent.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
     FutexQueue.cpp
@@ -128,6 +127,7 @@ set(KERNEL_SOURCES
     Interrupts/SpuriousInterruptHandler.cpp
     Interrupts/UnhandledInterruptHandler.cpp
     KBufferBuilder.cpp
+    KLexicalPath.cpp
     KString.cpp
     KSyms.cpp
     Lock.cpp
@@ -228,7 +228,6 @@ set(KERNEL_SOURCES
     Syscalls/waitid.cpp
     Syscalls/inode_watcher.cpp
     Syscalls/write.cpp
-    SystemExposed.cpp
     TTY/ConsoleManagement.cpp
     TTY/MasterPTY.cpp
     TTY/PTYMultiplexer.cpp
@@ -251,6 +250,7 @@ set(KERNEL_SOURCES
     UserOrKernelBuffer.cpp
     VirtIO/VirtIO.cpp
     VirtIO/VirtIOConsole.cpp
+    VirtIO/VirtIOConsolePort.cpp
     VirtIO/VirtIOQueue.cpp
     VirtIO/VirtIORNG.cpp
     VM/AnonymousVMObject.cpp
@@ -280,7 +280,7 @@ set(KERNEL_SOURCES
 set(KERNEL_SOURCES
     ${KERNEL_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/ASM_wrapper.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Boot/boot.S
+    ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Boot/ap_setup.S
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/InterruptEntry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/${KERNEL_ARCH}/Processor.cpp
 )
@@ -288,6 +288,7 @@ set(KERNEL_SOURCES
 set(KERNEL_SOURCES
     ${KERNEL_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/ASM_wrapper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Boot/boot.S
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Boot/multiboot.S
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/CPU.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Arch/x86/common/Interrupts.cpp
@@ -301,7 +302,6 @@ set(AK_SOURCES
     ../AK/FlyString.cpp
     ../AK/GenericLexer.cpp
     ../AK/Hex.cpp
-    ../AK/LexicalPath.cpp
     ../AK/String.cpp
     ../AK/StringBuilder.cpp
     ../AK/StringImpl.cpp
@@ -334,10 +334,6 @@ set(CRYPTO_SOURCES
     ../Userland/Libraries/LibCrypto/Hash/SHA2.cpp
 )
 
-set(C_SOURCES
-    ../Userland/Libraries/LibC/ctype.cpp
-)
-
 set(SOURCES
     ${KERNEL_SOURCES}
     ${AK_SOURCES}
@@ -345,7 +341,6 @@ set(SOURCES
     ${VT_SOURCES}
     ${KEYBOARD_SOURCES}
     ${CRYPTO_SOURCES}
-    ${C_SOURCES}
 )
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option -Wvla -Wnull-dereference")
@@ -353,6 +348,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -ffreestanding -fbuiltin")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mno-80387 -mno-mmx -mno-sse -mno-sse2")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-asynchronous-unwind-tables")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-strong")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions")
 if (NOT ${CMAKE_HOST_SYSTEM_NAME} MATCHES SerenityOS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdlib -nostdinc -nostdinc++")
 endif()
@@ -386,13 +382,13 @@ add_library(kernel_heap STATIC ${KERNEL_HEAP_SOURCES})
 if (${CMAKE_HOST_SYSTEM_NAME} MATCHES SerenityOS)
     include_directories(/usr/local/include/c++/${GCC_VERSION}/)
 else()
-    if (NOT EXISTS ${TOOLCHAIN_ROOT}/Kernel/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/)
+    if (NOT EXISTS ${TOOLCHAIN_ROOT}/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/)
         message(FATAL_ERROR "Toolchain version ${GCC_VERSION} appears to be missing! Please run: Meta/serenity.sh rebuild-toolchain")
     endif()
-    include_directories(${TOOLCHAIN_ROOT}/Kernel/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/)
-    include_directories(${TOOLCHAIN_ROOT}/Kernel/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/${SERENITY_ARCH}-pc-serenity/)
-    link_directories(${TOOLCHAIN_ROOT}/Kernel/${SERENITY_ARCH}-pc-serenity/lib)
-    link_directories(${TOOLCHAIN_ROOT}/Kernel/lib/gcc/${SERENITY_ARCH}-pc-serenity/${GCC_VERSION}/)
+    include_directories(${TOOLCHAIN_ROOT}/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/)
+    include_directories(${TOOLCHAIN_ROOT}/${SERENITY_ARCH}-pc-serenity/include/c++/${GCC_VERSION}/${SERENITY_ARCH}-pc-serenity/)
+    link_directories(${TOOLCHAIN_ROOT}/${SERENITY_ARCH}-pc-serenity/lib)
+    link_directories(${TOOLCHAIN_ROOT}/lib/gcc/${SERENITY_ARCH}-pc-serenity/${GCC_VERSION}/)
 endif()
 
 if ("${SERENITY_ARCH}" STREQUAL "i686")
@@ -411,7 +407,7 @@ if (ENABLE_KERNEL_LTO)
     check_ipo_supported()
     set_property(TARGET ${KERNEL_TARGET} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
-target_link_libraries(${KERNEL_TARGET} kernel_heap gcc supc++)
+target_link_libraries(${KERNEL_TARGET} kernel_heap gcc)
 add_dependencies(${KERNEL_TARGET} kernel_heap)
 
 add_custom_command(

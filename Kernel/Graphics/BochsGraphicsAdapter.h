@@ -13,11 +13,14 @@
 #include <Kernel/Graphics/FramebufferDevice.h>
 #include <Kernel/Graphics/GraphicsDevice.h>
 #include <Kernel/PhysicalAddress.h>
+#include <Kernel/VM/TypedMapping.h>
 
 namespace Kernel {
 
 class BochsFramebufferDevice;
 class GraphicsManagement;
+struct BochsDisplayMMIORegisters;
+
 class BochsGraphicsAdapter final : public GraphicsDevice
     , public PCI::DeviceController {
     AK_MAKE_ETERNAL
@@ -46,6 +49,7 @@ private:
     explicit BochsGraphicsAdapter(PCI::Address);
 
     void set_safe_resolution();
+    void unblank();
 
     bool validate_setup_resolution(size_t width, size_t height);
     u32 find_framebuffer_address();
@@ -55,6 +59,7 @@ private:
     void set_y_offset(size_t);
 
     PhysicalAddress m_mmio_registers;
+    TypedMapping<BochsDisplayMMIORegisters volatile> m_registers;
     RefPtr<FramebufferDevice> m_framebuffer_device;
     RefPtr<Graphics::GenericFramebufferConsole> m_framebuffer_console;
     SpinLock<u8> m_console_mode_switch_lock;

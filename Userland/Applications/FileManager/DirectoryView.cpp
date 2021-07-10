@@ -26,6 +26,23 @@
 
 namespace FileManager {
 
+void spawn_terminal(String const& directory)
+{
+    posix_spawn_file_actions_t spawn_actions;
+    posix_spawn_file_actions_init(&spawn_actions);
+    posix_spawn_file_actions_addchdir(&spawn_actions, directory.characters());
+
+    pid_t pid;
+    const char* argv[] = { "Terminal", nullptr };
+    if ((errno = posix_spawn(&pid, "/bin/Terminal", &spawn_actions, nullptr, const_cast<char**>(argv), environ))) {
+        perror("posix_spawn");
+    } else {
+        if (disown(pid) < 0)
+            perror("disown");
+    }
+    posix_spawn_file_actions_destroy(&spawn_actions);
+}
+
 enum class FileOperation {
     Copy,
 };
@@ -253,6 +270,7 @@ void DirectoryView::setup_icon_view()
 
     if (is_desktop()) {
         m_icon_view->set_frame_shape(Gfx::FrameShape::NoFrame);
+        m_icon_view->set_frame_thickness(0);
         m_icon_view->set_scrollbars_enabled(false);
         m_icon_view->set_fill_with_background_color(false);
         m_icon_view->set_draw_item_text_with_shadow(true);
@@ -569,18 +587,7 @@ void DirectoryView::setup_actions()
     });
 
     m_open_terminal_action = GUI::Action::create("Open &Terminal Here", Gfx::Bitmap::load_from_file("/res/icons/16x16/app-terminal.png"), [&](auto&) {
-        posix_spawn_file_actions_t spawn_actions;
-        posix_spawn_file_actions_init(&spawn_actions);
-        posix_spawn_file_actions_addchdir(&spawn_actions, path().characters());
-        pid_t pid;
-        const char* argv[] = { "Terminal", nullptr };
-        if ((errno = posix_spawn(&pid, "/bin/Terminal", &spawn_actions, nullptr, const_cast<char**>(argv), environ))) {
-            perror("posix_spawn");
-        } else {
-            if (disown(pid) < 0)
-                perror("disown");
-        }
-        posix_spawn_file_actions_destroy(&spawn_actions);
+        spawn_terminal(path());
     });
 
     m_delete_action = GUI::CommonActions::make_delete_action([this](auto&) { do_delete(true); }, window());

@@ -46,6 +46,12 @@ public:
     JS_ENUMERATE_BUILTIN_TYPES
 #undef __JS_ENUMERATE
 
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName)                                          \
+    Temporal::ConstructorName* temporal_##snake_name##_constructor() { return m_temporal_##snake_name##_constructor; } \
+    Object* temporal_##snake_name##_prototype() { return m_temporal_##snake_name##_prototype; }
+    JS_ENUMERATE_TEMPORAL_OBJECTS
+#undef __JS_ENUMERATE
+
 #define __JS_ENUMERATE(ClassName, snake_name) \
     Object* snake_name##_prototype() { return m_##snake_name##_prototype; }
     JS_ENUMERATE_ITERATOR_PROTOTYPES
@@ -95,6 +101,12 @@ private:
     JS_ENUMERATE_BUILTIN_TYPES
 #undef __JS_ENUMERATE
 
+#define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName)     \
+    Temporal::ConstructorName* m_temporal_##snake_name##_constructor { nullptr }; \
+    Object* m_temporal_##snake_name##_prototype { nullptr };
+    JS_ENUMERATE_TEMPORAL_OBJECTS
+#undef __JS_ENUMERATE
+
 #define __JS_ENUMERATE(ClassName, snake_name) \
     Object* m_##snake_name##_prototype { nullptr };
     JS_ENUMERATE_ITERATOR_PROTOTYPES
@@ -109,11 +121,11 @@ inline void GlobalObject::initialize_constructor(PropertyName const& property_na
 {
     auto& vm = this->vm();
     constructor = heap().allocate<ConstructorType>(*this, *this);
-    constructor->define_property(vm.names.name, js_string(heap(), property_name.as_string()), Attribute::Configurable);
+    constructor->define_direct_property(vm.names.name, js_string(heap(), property_name.as_string()), Attribute::Configurable);
     if (vm.exception())
         return;
     if (prototype) {
-        prototype->define_property(vm.names.constructor, constructor, Attribute::Writable | Attribute::Configurable);
+        prototype->define_direct_property(vm.names.constructor, constructor, Attribute::Writable | Attribute::Configurable);
         if (vm.exception())
             return;
     }
@@ -125,7 +137,7 @@ inline void GlobalObject::add_constructor(PropertyName const& property_name, Con
     // Some constructors are pre-initialized separately.
     if (!constructor)
         initialize_constructor(property_name, constructor, prototype);
-    define_property(property_name, constructor, Attribute::Writable | Attribute::Configurable);
+    define_direct_property(property_name, constructor, Attribute::Writable | Attribute::Configurable);
 }
 
 inline GlobalObject* Shape::global_object() const

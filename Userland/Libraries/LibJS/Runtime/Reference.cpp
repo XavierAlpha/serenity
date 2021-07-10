@@ -21,7 +21,7 @@ void Reference::put_value(GlobalObject& global_object, Value value)
             throw_reference_error(global_object);
             return;
         }
-        global_object.put(m_name, value);
+        global_object.set(m_name, value, false);
         return;
     }
 
@@ -29,9 +29,9 @@ void Reference::put_value(GlobalObject& global_object, Value value)
         // FIXME: This is an ad-hoc hack until we support proper variable bindings.
         if (!m_base_value.is_object() && vm.in_strict_mode()) {
             if (m_base_value.is_nullish())
-                vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishSetProperty, m_name.to_value(vm).to_string_without_side_effects(), m_base_value.to_string_without_side_effects());
+                vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishSetProperty, m_name, m_base_value.to_string_without_side_effects());
             else
-                vm.throw_exception<TypeError>(global_object, ErrorType::ReferencePrimitiveSetProperty, m_name.to_value(vm).to_string_without_side_effects(), m_base_value.typeof(), m_base_value.to_string_without_side_effects());
+                vm.throw_exception<TypeError>(global_object, ErrorType::ReferencePrimitiveSetProperty, m_name, m_base_value.typeof(), m_base_value.to_string_without_side_effects());
             return;
         }
 
@@ -39,9 +39,11 @@ void Reference::put_value(GlobalObject& global_object, Value value)
         if (!base_obj)
             return;
 
-        bool succeeded = base_obj->put(m_name, value);
+        bool succeeded = base_obj->internal_set(m_name, value, get_this_value());
+        if (vm.exception())
+            return;
         if (!succeeded && m_strict) {
-            vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishSetProperty, m_name.to_value(vm).to_string_without_side_effects(), m_base_value.to_string_without_side_effects());
+            vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishSetProperty, m_name, m_base_value.to_string_without_side_effects());
             return;
         }
         return;
@@ -66,7 +68,7 @@ void Reference::put_value(GlobalObject& global_object, Value value)
 
     if (!succeeded && m_strict) {
         // FIXME: This is a hack and will disappear when we support proper variable bindings.
-        vm.throw_exception<TypeError>(global_object, ErrorType::DescWriteNonWritable, m_name.to_value(vm).to_string_without_side_effects());
+        vm.throw_exception<TypeError>(global_object, ErrorType::DescWriteNonWritable, m_name);
         return;
     }
 }
@@ -92,7 +94,7 @@ Value Reference::get_value(GlobalObject& global_object, bool throw_if_undefined)
         auto* base_obj = m_base_value.to_object(global_object);
         if (!base_obj)
             return {};
-        return base_obj->get(m_name).value_or(js_undefined());
+        return base_obj->get(m_name);
     }
 
     VERIFY(m_base_type == BaseType::Environment);
@@ -108,28 +110,65 @@ Value Reference::get_value(GlobalObject& global_object, bool throw_if_undefined)
     return value->value;
 }
 
+// 13.5.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation
 bool Reference::delete_(GlobalObject& global_object)
 {
+    // 13.5.1.2 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-delete-operator-runtime-semantics-evaluation
+    // UnaryExpression : delete UnaryExpression
+
+    // NOTE: The following steps have already been evaluated by the time we get here:
+    // 1. Let ref be the result of evaluating UnaryExpression.
+    // 2. ReturnIfAbrupt(ref).
+    // 3. If ref is not a Reference Record, return true.
+
+    // 4. If IsUnresolvableReference(ref) is true, then
     if (is_unresolvable()) {
+        // a. Assert: ref.[[Strict]] is false.
         VERIFY(!m_strict);
+        // b. Return true.
         return true;
     }
 
     auto& vm = global_object.vm();
 
+    // 5. If IsPropertyReference(ref) is true, then
     if (is_property_reference()) {
-        auto* base_obj = m_base_value.to_object(global_object);
-        if (!base_obj)
-            return false;
-        bool succeeded = base_obj->delete_property(m_name);
-        if (!succeeded && m_strict) {
-            vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishDeleteProperty, m_name.to_value(vm).to_string_without_side_effects(), m_base_value.to_string_without_side_effects());
-            return false;
+        // a. Assert: ! IsPrivateReference(ref) is false.
+        // FIXME: We don't have private references yet.
+
+        // b. If IsSuperReference(ref) is true, throw a ReferenceError exception.
+        if (is_super_reference()) {
+            vm.throw_exception<ReferenceError>(global_object, ErrorType::UnsupportedDeleteSuperProperty);
+            return {};
         }
-        return succeeded;
+
+        // c. Let baseObj be ! ToObject(ref.[[Base]]).
+        auto* base_obj = m_base_value.to_object(global_object);
+        VERIFY(base_obj);
+
+        // d. Let deleteStatus be ? baseObj.[[Delete]](ref.[[ReferencedName]]).
+        bool delete_status = base_obj->internal_delete(m_name);
+        if (vm.exception())
+            return {};
+
+        // e. If deleteStatus is false and ref.[[Strict]] is true, throw a TypeError exception.
+        if (!delete_status && m_strict) {
+            vm.throw_exception<TypeError>(global_object, ErrorType::ReferenceNullishDeleteProperty, m_name, m_base_value.to_string_without_side_effects());
+            return {};
+        }
+
+        // f. Return deleteStatus.
+        return delete_status;
     }
 
+    // 6. Else,
+    //    a. Let base be ref.[[Base]].
+    //    b. Assert: base is an Environment Record.
+
     VERIFY(m_base_type == BaseType::Environment);
+
+    //    c. Return ? base.DeleteBinding(ref.[[ReferencedName]]).
+    // FIXME: This is ad-hoc, we should be calling DeleteBinding.
     return m_base_environment->delete_from_environment(m_name.as_string());
 }
 

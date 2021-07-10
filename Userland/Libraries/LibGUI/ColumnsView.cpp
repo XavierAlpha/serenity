@@ -258,7 +258,6 @@ void ColumnsView::model_did_update(unsigned flags)
     AbstractView::model_did_update(flags);
 
     // FIXME: Don't drop the columns on minor updates.
-    dbgln("Model was updated; dropping columns :(");
     m_columns.clear();
     m_columns.append({ {}, 0 });
 
@@ -299,8 +298,8 @@ void ColumnsView::move_cursor(CursorMovement movement, SelectionUpdate selection
             if (model.is_valid(cursor_index()))
                 push_column(cursor_index());
             update();
-            break;
         }
+        break;
     default:
         break;
     }
@@ -322,6 +321,14 @@ Gfx::IntRect ColumnsView::content_rect(const ModelIndex& index) const
     }
 
     return {};
+}
+
+Gfx::IntRect ColumnsView::paint_invalidation_rect(ModelIndex const& index) const
+{
+    auto rect = content_rect(index);
+    rect.translate_by(-icon_size(), 0);
+    rect.set_width(rect.width() + icon_size());
+    return rect;
 }
 
 }

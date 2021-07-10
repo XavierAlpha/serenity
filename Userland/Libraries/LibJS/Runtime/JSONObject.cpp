@@ -37,7 +37,7 @@ void JSONObject::initialize(GlobalObject& global_object)
     define_native_function(vm.names.parse, parse, 2, attr);
 
     // 25.5.3 JSON [ @@toStringTag ], https://tc39.es/ecma262/#sec-json-@@tostringtag
-    define_property(*vm.well_known_symbol_to_string_tag(), js_string(global_object.heap(), "JSON"), Attribute::Configurable);
+    define_direct_property(*vm.well_known_symbol_to_string_tag(), js_string(global_object.heap(), "JSON"), Attribute::Configurable);
 }
 
 JSONObject::~JSONObject()
@@ -117,7 +117,7 @@ String JSONObject::stringify_impl(GlobalObject& global_object, Value value, Valu
     }
 
     auto* wrapper = Object::create(global_object, global_object.object_prototype());
-    wrapper->define_property(String::empty(), value);
+    wrapper->create_data_property_or_throw(String::empty(), value);
     auto result = serialize_json_property(global_object, state, String::empty(), wrapper);
     if (vm.exception())
         return {};
@@ -146,7 +146,7 @@ JS_DEFINE_NATIVE_FUNCTION(JSONObject::stringify)
 String JSONObject::serialize_json_property(GlobalObject& global_object, StringifyState& state, const PropertyName& key, Object* holder)
 {
     auto& vm = global_object.vm();
-    auto value = holder->get(key).value_or(js_undefined());
+    auto value = holder->get(key);
     if (vm.exception())
         return {};
     if (value.is_object() || value.is_bigint()) {
@@ -256,7 +256,7 @@ String JSONObject::serialize_json_object(GlobalObject& global_object, StringifyS
                 return {};
         }
     } else {
-        auto property_list = object.get_enumerable_own_property_names(PropertyKind::Key);
+        auto property_list = object.enumerable_own_property_names(PropertyKind::Key);
         if (vm.exception())
             return {};
         for (auto& property : property_list) {
@@ -428,7 +428,7 @@ JS_DEFINE_NATIVE_FUNCTION(JSONObject::parse)
     if (reviver.is_function()) {
         auto* root = Object::create(global_object, global_object.object_prototype());
         auto root_name = String::empty();
-        root->define_property(root_name, unfiltered);
+        root->create_data_property_or_throw(root_name, unfiltered);
         auto result = internalize_json_property(global_object, root, root_name, reviver.as_function());
         if (vm.exception())
             return {};
@@ -460,17 +460,17 @@ Object* JSONObject::parse_json_object(GlobalObject& global_object, const JsonObj
 {
     auto* object = Object::create(global_object, global_object.object_prototype());
     json_object.for_each_member([&](auto& key, auto& value) {
-        object->define_property(key, parse_json_value(global_object, value));
+        object->define_direct_property(key, parse_json_value(global_object, value), JS::default_attributes);
     });
     return object;
 }
 
 Array* JSONObject::parse_json_array(GlobalObject& global_object, const JsonArray& json_array)
 {
-    auto* array = Array::create(global_object);
+    auto* array = Array::create(global_object, 0);
     size_t index = 0;
     json_array.for_each([&](auto& value) {
-        array->define_property(index++, parse_json_value(global_object, value));
+        array->define_direct_property(index++, parse_json_value(global_object, value), JS::default_attributes);
     });
     return array;
 }
@@ -479,7 +479,7 @@ Array* JSONObject::parse_json_array(GlobalObject& global_object, const JsonArray
 Value JSONObject::internalize_json_property(GlobalObject& global_object, Object* holder, PropertyName const& name, FunctionObject& reviver)
 {
     auto& vm = global_object.vm();
-    auto value = holder->get(name).value_or(js_undefined());
+    auto value = holder->get(name);
     if (vm.exception())
         return {};
     if (value.is_object()) {
@@ -493,9 +493,9 @@ Value JSONObject::internalize_json_property(GlobalObject& global_object, Object*
             if (vm.exception())
                 return;
             if (element.is_undefined())
-                value_object.delete_property(key);
+                value_object.internal_delete(key);
             else
-                value_object.define_property(key, element, default_attributes);
+                value_object.create_data_property(key, element);
         };
 
         if (is_array) {
@@ -508,7 +508,9 @@ Value JSONObject::internalize_json_property(GlobalObject& global_object, Object*
                     return {};
             }
         } else {
-            auto property_list = value_object.get_enumerable_own_property_names(Object::PropertyKind::Key);
+            auto property_list = value_object.enumerable_own_property_names(Object::PropertyKind::Key);
+            if (vm.exception())
+                return {};
             for (auto& property_name : property_list) {
                 process_property(property_name.as_string().string());
                 if (vm.exception())

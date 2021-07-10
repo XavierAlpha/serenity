@@ -185,8 +185,7 @@ public:
     template<typename F>
     IterationDecision for_each_framebuffer(F f)
     {
-        for (size_t i = 0; i < VIRTIO_GPU_MAX_SCANOUTS; i++) {
-            auto& scanout = m_scanouts[i];
+        for (auto& scanout : m_scanouts) {
             if (!scanout.framebuffer)
                 continue;
             IterationDecision decision = f(*scanout.framebuffer, *scanout.console);
@@ -220,7 +219,7 @@ private:
     void query_display_information();
     VirtIOGPUResourceID create_2d_resource(VirtIOGPURect rect);
     void delete_resource(VirtIOGPUResourceID resource_id);
-    void ensure_backing_storage(Region& region, size_t buffer_length, VirtIOGPUResourceID resource_id);
+    void ensure_backing_storage(Region& region, size_t buffer_offset, size_t buffer_length, VirtIOGPUResourceID resource_id);
     void detach_backing_storage(VirtIOGPUResourceID resource_id);
     void set_scanout_resource(VirtIOGPUScanoutID scanout, VirtIOGPUResourceID resource_id, VirtIOGPURect rect);
     void transfer_framebuffer_data_to_host(VirtIOGPUScanoutID scanout, VirtIOGPURect const& rect, VirtIOGPUResourceID resource_id);

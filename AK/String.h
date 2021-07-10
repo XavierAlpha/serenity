@@ -99,6 +99,7 @@ public:
     [[nodiscard]] static String repeated(const StringView&, size_t count);
 
     [[nodiscard]] static String bijective_base_from(size_t value, unsigned base = 26, StringView map = {});
+    [[nodiscard]] static String roman_number_from(size_t value);
 
     template<class SeparatorType, class CollectionType>
     [[nodiscard]] static String join(const SeparatorType& separator, const CollectionType& collection)
@@ -140,14 +141,18 @@ public:
 
     [[nodiscard]] Vector<String> split_limit(char separator, size_t limit, bool keep_empty = false) const;
     [[nodiscard]] Vector<String> split(char separator, bool keep_empty = false) const;
-
-    [[nodiscard]] Optional<size_t> find(char, size_t start = 0) const;
-    [[nodiscard]] Optional<size_t> find(StringView const&, size_t start = 0) const;
-
-    [[nodiscard]] String substring(size_t start) const;
-    [[nodiscard]] String substring(size_t start, size_t length) const;
-
     [[nodiscard]] Vector<StringView> split_view(char separator, bool keep_empty = false) const;
+
+    [[nodiscard]] Optional<size_t> find(char needle, size_t start = 0) const { return StringUtils::find(*this, needle, start); }
+    [[nodiscard]] Optional<size_t> find(StringView const& needle, size_t start = 0) const { return StringUtils::find(*this, needle, start); }
+    [[nodiscard]] Optional<size_t> find_last(char needle) const { return StringUtils::find_last(*this, needle); }
+    // FIXME: Implement find_last(StringView const&) for API symmetry.
+    [[nodiscard]] Vector<size_t> find_all(StringView const& needle) const { return StringUtils::find_all(*this, needle); }
+    using SearchDirection = StringUtils::SearchDirection;
+    [[nodiscard]] Optional<size_t> find_any_of(StringView const& needles, SearchDirection direction) const { return StringUtils::find_any_of(*this, needles, direction); }
+
+    [[nodiscard]] String substring(size_t start, size_t length) const;
+    [[nodiscard]] String substring(size_t start) const;
     [[nodiscard]] StringView substring_view(size_t start, size_t length) const;
     [[nodiscard]] StringView substring_view(size_t start) const;
 
@@ -279,7 +284,6 @@ public:
 
     int replace(const String& needle, const String& replacement, bool all_occurrences = false);
     size_t count(const String& needle) const;
-    Vector<size_t> find_all(const String& needle) const;
     [[nodiscard]] String reverse() const;
 
     template<typename... Ts>

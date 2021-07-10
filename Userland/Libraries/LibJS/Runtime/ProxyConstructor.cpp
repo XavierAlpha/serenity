@@ -37,9 +37,10 @@ void ProxyConstructor::initialize(GlobalObject& global_object)
 {
     auto& vm = this->vm();
     NativeFunction::initialize(global_object);
-    define_property(vm.names.length, Value(2), Attribute::Configurable);
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(vm.names.revocable, revocable, 2, attr);
+
+    define_direct_property(vm.names.length, Value(2), Attribute::Configurable);
 }
 
 ProxyConstructor::~ProxyConstructor()
@@ -79,11 +80,12 @@ JS_DEFINE_NATIVE_FUNCTION(ProxyConstructor::revocable)
         proxy.revoke();
         return js_undefined();
     });
-    revoker->define_property(vm.names.length, Value(0), Attribute::Configurable);
+    revoker->define_direct_property(vm.names.length, Value(0), Attribute::Configurable);
+    revoker->define_direct_property(vm.names.name, js_string(vm, String::empty()), Attribute::Configurable);
 
     auto* result = Object::create(global_object, global_object.object_prototype());
-    result->define_property(vm.names.proxy, proxy);
-    result->define_property(vm.names.revoke, revoker);
+    result->create_data_property_or_throw(vm.names.proxy, proxy);
+    result->create_data_property_or_throw(vm.names.revoke, revoker);
     return result;
 }
 

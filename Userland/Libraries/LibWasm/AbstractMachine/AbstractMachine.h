@@ -350,8 +350,13 @@ public:
         if (size_to_grow == 0)
             return true;
         auto new_size = m_data.size() + size_to_grow;
-        if (m_type.limits().max().value_or(new_size) < new_size)
+        // Can't grow past 2^16 pages.
+        if (new_size >= Constants::page_size * 65536)
             return false;
+        if (auto max = m_type.limits().max(); max.has_value()) {
+            if (max.value() * Constants::page_size < new_size)
+                return false;
+        }
         auto previous_size = m_size;
         m_data.resize(new_size);
         m_size = new_size;

@@ -25,11 +25,17 @@ BrushTool::~BrushTool()
 {
 }
 
-void BrushTool::on_mousedown(Layer&, GUI::MouseEvent& event, GUI::MouseEvent&)
+void BrushTool::on_mousedown(Layer& layer, GUI::MouseEvent& event, GUI::MouseEvent&)
 {
     if (event.button() != GUI::MouseButton::Left && event.button() != GUI::MouseButton::Right)
         return;
 
+    const int first_draw_opacity = 10;
+
+    for (int i = 0; i < first_draw_opacity; ++i)
+        draw_point(layer.bitmap(), m_editor->color_for(event), event.position());
+
+    layer.did_modify_bitmap();
     m_last_position = event.position();
 }
 
@@ -39,7 +45,10 @@ void BrushTool::on_mousemove(Layer& layer, GUI::MouseEvent& event, GUI::MouseEve
         return;
 
     draw_line(layer.bitmap(), m_editor->color_for(event), m_last_position, event.position());
-    layer.did_modify_bitmap();
+
+    auto modified_rect = Gfx::IntRect::from_two_points(m_last_position, event.position()).inflated(m_size * 2, m_size * 2);
+
+    layer.did_modify_bitmap(modified_rect);
     m_last_position = event.position();
     m_was_drawing = true;
 }

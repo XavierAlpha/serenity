@@ -193,7 +193,7 @@ RefPtr<Bitmap> Bitmap::create_with_anonymous_buffer(BitmapFormat format, Core::A
     if (size_would_overflow(format, size, scale_factor))
         return nullptr;
 
-    return adopt_ref(*new Bitmap(format, buffer, size, scale_factor, palette));
+    return adopt_ref(*new Bitmap(format, move(buffer), size, scale_factor, palette));
 }
 
 /// Read a bitmap as described by:
@@ -290,7 +290,7 @@ Bitmap::Bitmap(BitmapFormat format, Core::AnonymousBuffer buffer, const IntSize&
     , m_pitch(minimum_pitch(size.width() * scale_factor, format))
     , m_format(format)
     , m_purgeable(true)
-    , m_buffer(buffer)
+    , m_buffer(move(buffer))
 {
     VERIFY(!is_indexed() || !palette.is_empty());
     VERIFY(!size_would_overflow(format, size, scale_factor));
@@ -420,8 +420,8 @@ RefPtr<Gfx::Bitmap> Bitmap::scaled(float sx, float sy) const
             auto p = static_cast<float>(x) * static_cast<float>(old_width - 1) / static_cast<float>(new_width - 1);
             auto q = static_cast<float>(y) * static_cast<float>(old_height - 1) / static_cast<float>(new_height - 1);
 
-            int i = floor(p);
-            int j = floor(q);
+            int i = floorf(p);
+            int j = floorf(q);
             float u = p - static_cast<float>(i);
             float v = q - static_cast<float>(j);
 
@@ -443,7 +443,7 @@ RefPtr<Gfx::Bitmap> Bitmap::scaled(float sx, float sy) const
     for (int x = 0; x < new_width - 1; x++) {
         auto p = static_cast<float>(x) * static_cast<float>(old_width - 1) / static_cast<float>(new_width - 1);
 
-        int i = floor(p);
+        int i = floorf(p);
         float u = p - static_cast<float>(i);
 
         auto a = get_pixel(i, old_bottom_y);
@@ -458,7 +458,7 @@ RefPtr<Gfx::Bitmap> Bitmap::scaled(float sx, float sy) const
     for (int y = 0; y < new_height - 1; y++) {
         auto q = static_cast<float>(y) * static_cast<float>(old_height - 1) / static_cast<float>(new_height - 1);
 
-        int j = floor(q);
+        int j = floorf(q);
         float v = q - static_cast<float>(j);
 
         auto c = get_pixel(old_right_x, j);
@@ -501,7 +501,7 @@ RefPtr<Bitmap> Bitmap::to_bitmap_backed_by_anonymous_buffer() const
     auto buffer = Core::AnonymousBuffer::create_with_size(round_up_to_power_of_two(size_in_bytes(), PAGE_SIZE));
     if (!buffer.is_valid())
         return nullptr;
-    auto bitmap = Bitmap::create_with_anonymous_buffer(m_format, buffer, size(), scale(), palette_to_vector());
+    auto bitmap = Bitmap::create_with_anonymous_buffer(m_format, move(buffer), size(), scale(), palette_to_vector());
     if (!bitmap)
         return nullptr;
     memcpy(bitmap->scanline(0), scanline(0), size_in_bytes());

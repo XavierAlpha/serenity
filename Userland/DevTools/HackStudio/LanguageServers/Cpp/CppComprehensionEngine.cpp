@@ -117,7 +117,7 @@ Optional<Vector<GUI::AutocompleteProvider::Entry>> CppComprehensionEngine::try_a
 
     auto partial_text = String::empty();
     if (containing_token.value().type() != Token::Type::Dot) {
-        if (&node != parent.m_property)
+        if (&node != parent.property())
             return {};
         partial_text = containing_token.value().text();
     }
@@ -177,6 +177,7 @@ Vector<StringView> CppComprehensionEngine::scope_of_reference_to_symbol(const AS
 {
     const Name* name = nullptr;
     if (node.is_name()) {
+        // FIXME It looks like this code path is never taken
         name = reinterpret_cast<const Name*>(&node);
     } else if (node.is_identifier()) {
         auto* parent = node.parent();
@@ -190,15 +191,16 @@ Vector<StringView> CppComprehensionEngine::scope_of_reference_to_symbol(const AS
     VERIFY(name->is_name());
 
     Vector<StringView> scope_parts;
-    for (auto& scope_part : name->m_scope) {
-        scope_parts.append(scope_part.m_name);
+    for (auto& scope_part : name->scope()) {
+        scope_parts.append(scope_part.name());
     }
     return scope_parts;
 }
 
 Vector<GUI::AutocompleteProvider::Entry> CppComprehensionEngine::autocomplete_property(const DocumentData& document, const MemberExpression& parent, const String partial_text) const
 {
-    auto type = type_of(document, *parent.m_object);
+    VERIFY(parent.object());
+    auto type = type_of(document, *parent.object());
     if (type.is_null()) {
         dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "Could not infer type of object");
         return {};
@@ -218,27 +220,29 @@ bool CppComprehensionEngine::is_property(const ASTNode& node) const
     if (!node.parent()->is_member_expression())
         return false;
 
-    auto& parent = (MemberExpression&)(*node.parent());
-    return parent.m_property.ptr() == &node;
+    auto& parent = verify_cast<MemberExpression>(*node.parent());
+    return parent.property() == &node;
 }
 
 String CppComprehensionEngine::type_of_property(const DocumentData& document, const Identifier& identifier) const
 {
-    auto& parent = (const MemberExpression&)(*identifier.parent());
-    auto properties = properties_of_type(document, type_of(document, *parent.m_object));
+    auto& parent = verify_cast<MemberExpression>(*identifier.parent());
+    VERIFY(parent.object());
+    auto properties = properties_of_type(document, type_of(document, *parent.object()));
     for (auto& prop : properties) {
-        if (prop.name.name != identifier.m_name)
+        if (prop.name.name != identifier.name())
             continue;
-        Type* type { nullptr };
+        const Type* type { nullptr };
         if (prop.declaration->is_variable_declaration()) {
-            type = ((VariableDeclaration&)*prop.declaration).m_type.ptr();
+            type = verify_cast<VariableDeclaration>(*prop.declaration).type();
         }
         if (!type)
             continue;
         if (!type->is_named_type())
             continue;
 
-        return ((NamedType&)*type).m_name->full_name();
+        VERIFY(verify_cast<NamedType>(*type).name());
+        return verify_cast<NamedType>(*type).name()->full_name();
     }
     return {};
 }
@@ -249,9 +253,10 @@ String CppComprehensionEngine::type_of_variable(const Identifier& identifier) co
     while (current) {
         for (auto& decl : current->declarations()) {
             if (decl.is_variable_or_parameter_declaration()) {
-                auto& var_or_param = (VariableOrParameterDeclaration&)decl;
-                if (var_or_param.m_name == identifier.m_name && var_or_param.m_type->is_named_type()) {
-                    return ((NamedType&)(*var_or_param.m_type)).m_name->full_name();
+                auto& var_or_param = verify_cast<VariableOrParameterDeclaration>(decl);
+                if (var_or_param.name() == identifier.name() && var_or_param.type()->is_named_type()) {
+                    VERIFY(verify_cast<NamedType>(*var_or_param.type()).name());
+                    return verify_cast<NamedType>(*var_or_param.type()).name()->full_name();
                 }
             }
         }
@@ -263,15 +268,16 @@ String CppComprehensionEngine::type_of_variable(const Identifier& identifier) co
 String CppComprehensionEngine::type_of(const DocumentData& document, const Expression& expression) const
 {
     if (expression.is_member_expression()) {
-        auto& member_expression = (const MemberExpression&)expression;
-        if (member_expression.m_property->is_identifier())
-            return type_of_property(document, static_cast<const Identifier&>(*member_expression.m_property));
+        auto& member_expression = verify_cast<MemberExpression>(expression);
+        VERIFY(member_expression.property());
+        if (member_expression.property()->is_identifier())
+            return type_of_property(document, static_cast<const Identifier&>(*member_expression.property()));
         return {};
     }
 
     const Identifier* identifier { nullptr };
     if (expression.is_name()) {
-        identifier = static_cast<const Name&>(expression).m_name.ptr();
+        identifier = static_cast<const Name&>(expression).name();
     } else if (expression.is_identifier()) {
         identifier = &static_cast<const Identifier&>(expression);
     } else {
@@ -299,15 +305,15 @@ Vector<CppComprehensionEngine::Symbol> CppComprehensionEngine::properties_of_typ
         return {};
     }
 
-    auto& struct_or_class = (StructOrClassDeclaration&)*decl;
+    auto& struct_or_class = verify_cast<StructOrClassDeclaration>(*decl);
     VERIFY(struct_or_class.name() == type_symbol.name);
 
     Vector<Symbol> properties;
-    for (auto& member : struct_or_class.m_members) {
+    for (auto& member : struct_or_class.members()) {
         Vector<StringView> scope(type_symbol.scope);
         scope.append(type_symbol.name);
         // FIXME: We don't have to create the Symbol here, it should already exist in the 'm_symbol' table of some DocumentData we already parsed.
-        properties.append(Symbol::create(member.m_name, scope, member, Symbol::IsLocal::No));
+        properties.append(Symbol::create(member.name(), scope, member, Symbol::IsLocal::No));
     }
     return properties;
 }
@@ -434,7 +440,7 @@ static Optional<TargetDeclaration> get_target_declaration(const ASTNode& node)
         return {};
     }
 
-    String name = static_cast<const Identifier&>(node).m_name;
+    String name = static_cast<const Identifier&>(node).name();
 
     if ((node.parent() && node.parent()->is_function_call()) || (node.parent()->is_name() && node.parent()->parent() && node.parent()->parent()->is_function_call())) {
         return TargetDeclaration { TargetDeclaration::Type::Function, name };
@@ -454,6 +460,7 @@ RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentDa
     dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "find_declaration_of: {} ({})", document_data.parser().text_of_node(node), node.class_name());
     if (!node.is_identifier()) {
         dbgln("node is not an identifier, can't find declaration");
+        return {};
     }
 
     auto target_decl = get_target_declaration(node);
@@ -467,7 +474,7 @@ RefPtr<Declaration> CppComprehensionEngine::find_declaration_of(const DocumentDa
         bool match_function = target_decl.value().type == TargetDeclaration::Function && symbol.declaration->is_function();
         bool match_variable = target_decl.value().type == TargetDeclaration::Variable && symbol.declaration->is_variable_declaration();
         bool match_type = target_decl.value().type == TargetDeclaration::Type && symbol.declaration->is_struct_or_class();
-        bool match_property = target_decl.value().type == TargetDeclaration::Property && symbol.declaration->parent()->is_declaration() && ((Declaration*)symbol.declaration->parent())->is_struct_or_class();
+        bool match_property = target_decl.value().type == TargetDeclaration::Property && symbol.declaration->parent()->is_declaration() && verify_cast<Declaration>(symbol.declaration->parent())->is_struct_or_class();
         bool match_parameter = target_decl.value().type == TargetDeclaration::Variable && symbol.declaration->is_parameter();
 
         if (match_property) {
@@ -612,7 +619,7 @@ Vector<StringView> CppComprehensionEngine::scope_of_node(const ASTNode& node) co
 
     StringView containing_scope;
     if (parent_decl.is_namespace())
-        containing_scope = static_cast<NamespaceDeclaration&>(parent_decl).m_name;
+        containing_scope = static_cast<NamespaceDeclaration&>(parent_decl).name();
     if (parent_decl.is_struct_or_class())
         containing_scope = static_cast<StructOrClassDeclaration&>(parent_decl).name();
     if (parent_decl.is_function())
@@ -637,7 +644,7 @@ Optional<Vector<GUI::AutocompleteProvider::Entry>> CppComprehensionEngine::try_a
     } else
         return {};
 
-    auto last_slash = partial_include.find_last_of("/");
+    auto last_slash = partial_include.find_last('/');
     auto include_dir = String::empty();
     auto partial_basename = partial_include.substring_view((last_slash.has_value() ? last_slash.value() : 0) + 1);
     if (last_slash.has_value()) {
@@ -724,6 +731,117 @@ bool CppComprehensionEngine::is_symbol_available(const Symbol& symbol, const Vec
             return false;
     }
     return true;
+}
+
+Optional<CodeComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::get_function_params_hint(const String& filename, const GUI::TextPosition& identifier_position)
+{
+    const auto* document_ptr = get_or_create_document_data(filename);
+    if (!document_ptr)
+        return {};
+
+    const auto& document = *document_ptr;
+    Cpp::Position cpp_position { identifier_position.line(), identifier_position.column() };
+    auto node = document.parser().node_at(cpp_position);
+    if (!node) {
+        dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "no node at position {}:{}", identifier_position.line(), identifier_position.column());
+        return {};
+    }
+
+    dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "node type: {}", node->class_name());
+
+    FunctionCall* call_node { nullptr };
+
+    if (node->is_function_call()) {
+        call_node = verify_cast<FunctionCall>(node.ptr());
+
+        auto token = document.parser().token_at(cpp_position);
+
+        // If we're in a function call with 0 arguments
+        if (token.has_value() && (token->type() == Token::Type::LeftParen || token->type() == Token::Type::RightParen)) {
+            return get_function_params_hint(document, *call_node, call_node->arguments().is_empty() ? 0 : call_node->arguments().size() - 1);
+        }
+    }
+
+    // Walk upwards in the AST to find a FunctionCall node
+    while (!call_node && node) {
+        auto parent_is_call = node->parent() && node->parent()->is_function_call();
+        if (parent_is_call) {
+            call_node = verify_cast<FunctionCall>(node->parent());
+            break;
+        }
+        node = node->parent();
+    }
+
+    if (!call_node) {
+        dbgln("did not find function call");
+        return {};
+    }
+
+    Optional<size_t> invoked_arg_index;
+    for (size_t arg_index = 0; arg_index < call_node->arguments().size(); ++arg_index) {
+        if (&call_node->arguments()[arg_index] == node.ptr()) {
+            invoked_arg_index = arg_index;
+            break;
+        }
+    }
+    if (!invoked_arg_index.has_value()) {
+        dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "could not find argument index, defaulting to the last argument");
+        invoked_arg_index = call_node->arguments().is_empty() ? 0 : call_node->arguments().size() - 1;
+    }
+
+    dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "arg index: {}", invoked_arg_index.value());
+    return get_function_params_hint(document, *call_node, invoked_arg_index.value());
+}
+
+Optional<CppComprehensionEngine::FunctionParamsHint> CppComprehensionEngine::get_function_params_hint(
+    DocumentData const& document,
+    FunctionCall& call_node,
+    size_t argument_index)
+{
+    const Identifier* callee = nullptr;
+    VERIFY(call_node.callee());
+    if (call_node.callee()->is_identifier()) {
+        callee = verify_cast<Identifier>(call_node.callee());
+    } else if (call_node.callee()->is_name()) {
+        callee = verify_cast<Name>(*call_node.callee()).name();
+    } else if (call_node.callee()->is_member_expression()) {
+        auto& member_exp = verify_cast<MemberExpression>(*call_node.callee());
+        VERIFY(member_exp.property());
+        if (member_exp.property()->is_identifier()) {
+            callee = verify_cast<Identifier>(member_exp.property());
+        }
+    }
+
+    if (!callee) {
+        dbgln("unexpected node type for function call: {}", call_node.callee()->class_name());
+        return {};
+    }
+    VERIFY(callee);
+
+    auto decl = find_declaration_of(document, *callee);
+    if (!decl) {
+        dbgln("func decl not found");
+        return {};
+    }
+    if (!decl->is_function()) {
+        dbgln("declaration is not a function");
+        return {};
+    }
+
+    auto& func_decl = verify_cast<FunctionDeclaration>(*decl);
+    auto document_of_declaration = get_document_data(func_decl.filename());
+
+    FunctionParamsHint hint {};
+    hint.current_index = argument_index;
+    for (auto& arg : func_decl.parameters()) {
+        Vector<StringView> tokens_text;
+        for (auto token : document_of_declaration->parser().tokens_in_range(arg.start(), arg.end())) {
+            tokens_text.append(token.text());
+        }
+        hint.params.append(String::join(" ", tokens_text));
+    }
+
+    return hint;
 }
 
 }

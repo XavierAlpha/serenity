@@ -113,7 +113,6 @@ namespace Kernel {
     S(setsockopt)                 \
     S(create_thread)              \
     S(gettid)                     \
-    S(donate)                     \
     S(rename)                     \
     S(ftruncate)                  \
     S(exit_thread)                \
@@ -180,7 +179,8 @@ namespace Kernel {
     S(readv)                      \
     S(emuctl)                     \
     S(statvfs)                    \
-    S(fstatvfs)
+    S(fstatvfs)                   \
+    S(kill_thread)
 
 namespace Syscall {
 

@@ -41,7 +41,6 @@ public:
         Symbol,
         Accessor,
         BigInt,
-        NativeProperty,
     };
 
     enum class PreferredType {
@@ -60,9 +59,8 @@ public:
     bool is_symbol() const { return m_type == Type::Symbol; }
     bool is_accessor() const { return m_type == Type::Accessor; };
     bool is_bigint() const { return m_type == Type::BigInt; };
-    bool is_native_property() const { return m_type == Type::NativeProperty; }
     bool is_nullish() const { return is_null() || is_undefined(); }
-    bool is_cell() const { return is_string() || is_accessor() || is_object() || is_bigint() || is_symbol() || is_native_property(); }
+    bool is_cell() const { return is_string() || is_accessor() || is_object() || is_bigint() || is_symbol(); }
     bool is_array(GlobalObject&) const;
     bool is_function() const;
     bool is_constructor() const;
@@ -164,12 +162,6 @@ public:
         m_value.as_bigint = const_cast<BigInt*>(bigint);
     }
 
-    Value(const NativeProperty* native_property)
-        : m_type(Type::NativeProperty)
-    {
-        m_value.as_native_property = const_cast<NativeProperty*>(native_property);
-    }
-
     explicit Value(Type type)
         : m_type(type)
     {
@@ -245,12 +237,6 @@ public:
         return *m_value.as_bigint;
     }
 
-    NativeProperty& as_native_property()
-    {
-        VERIFY(is_native_property());
-        return *m_value.as_native_property;
-    }
-
     Array& as_array();
     FunctionObject& as_function();
 
@@ -301,6 +287,8 @@ public:
 
     String typeof() const;
 
+    bool operator==(Value const&) const;
+
 private:
     Type m_type { Type::Empty };
 
@@ -316,7 +304,6 @@ private:
         Cell* as_cell;
         Accessor* as_accessor;
         BigInt* as_bigint;
-        NativeProperty* as_native_property;
 
         u64 encoded;
     } m_value { .encoded = 0 };
@@ -382,6 +369,8 @@ bool same_value(Value lhs, Value rhs);
 bool same_value_zero(Value lhs, Value rhs);
 bool same_value_non_numeric(Value lhs, Value rhs);
 TriState abstract_relation(GlobalObject&, bool left_first, Value lhs, Value rhs);
+
+inline bool Value::operator==(Value const& value) const { return same_value(*this, value); }
 
 struct ValueTraits : public Traits<Value> {
     static unsigned hash(Value value)

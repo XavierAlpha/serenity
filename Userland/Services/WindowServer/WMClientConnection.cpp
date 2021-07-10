@@ -115,6 +115,31 @@ void WMClientConnection::set_window_minimized(i32 client_id, i32 window_id, bool
     WindowManager::the().minimize_windows(window, minimized);
 }
 
+void WMClientConnection::toggle_show_desktop()
+{
+    bool should_hide = false;
+    auto& current_window_stack = WindowManager::the().current_window_stack();
+    current_window_stack.for_each_window([&](auto& window) {
+        if (window.type() == WindowType::Normal && window.is_minimizable()) {
+            if (!window.is_hidden() && !window.is_minimized()) {
+                should_hide = true;
+                return IterationDecision::Break;
+            }
+        }
+        return IterationDecision::Continue;
+    });
+
+    current_window_stack.for_each_window([&](auto& window) {
+        if (window.type() == WindowType::Normal && window.is_minimizable()) {
+            auto state = window.minimized_state();
+            if (state == WindowMinimizedState::None || state == WindowMinimizedState::Hidden) {
+                WindowManager::the().hide_windows(window, should_hide);
+            }
+        }
+        return IterationDecision::Continue;
+    });
+}
+
 void WMClientConnection::set_event_mask(u32 event_mask)
 {
     m_event_mask = event_mask;

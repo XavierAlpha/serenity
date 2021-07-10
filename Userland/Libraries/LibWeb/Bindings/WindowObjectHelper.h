@@ -22,6 +22,8 @@
 #include <LibWeb/Bindings/DOMExceptionPrototype.h>
 #include <LibWeb/Bindings/DOMImplementationConstructor.h>
 #include <LibWeb/Bindings/DOMImplementationPrototype.h>
+#include <LibWeb/Bindings/DOMParserConstructor.h>
+#include <LibWeb/Bindings/DOMParserPrototype.h>
 #include <LibWeb/Bindings/DocumentConstructor.h>
 #include <LibWeb/Bindings/DocumentFragmentConstructor.h>
 #include <LibWeb/Bindings/DocumentFragmentPrototype.h>
@@ -224,12 +226,12 @@
 #include <LibWeb/Bindings/XMLHttpRequestEventTargetPrototype.h>
 #include <LibWeb/Bindings/XMLHttpRequestPrototype.h>
 
-#define ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, constructor_name, prototype_name)                         \
-    {                                                                                                                         \
-        auto& constructor = ensure_web_constructor<constructor_name>(#interface_name);                                        \
-        constructor.define_property(vm.names.name, js_string(vm, #interface_name), JS::Attribute::Configurable);              \
-        auto& prototype = ensure_web_prototype<prototype_name>(#interface_name);                                              \
-        prototype.define_property(vm.names.constructor, &constructor, JS::Attribute::Writable | JS::Attribute::Configurable); \
+#define ADD_WINDOW_OBJECT_CONSTRUCTOR_AND_PROTOTYPE(interface_name, constructor_name, prototype_name)                                \
+    {                                                                                                                                \
+        auto& constructor = ensure_web_constructor<constructor_name>(#interface_name);                                               \
+        constructor.define_direct_property(vm.names.name, js_string(vm, #interface_name), JS::Attribute::Configurable);              \
+        auto& prototype = ensure_web_prototype<prototype_name>(#interface_name);                                                     \
+        prototype.define_direct_property(vm.names.constructor, &constructor, JS::Attribute::Writable | JS::Attribute::Configurable); \
     }
 
 #define ADD_WINDOW_OBJECT_INTERFACE(interface_name) \
@@ -247,6 +249,7 @@
     ADD_WINDOW_OBJECT_INTERFACE(DocumentType)              \
     ADD_WINDOW_OBJECT_INTERFACE(DOMException)              \
     ADD_WINDOW_OBJECT_INTERFACE(DOMImplementation)         \
+    ADD_WINDOW_OBJECT_INTERFACE(DOMParser)                 \
     ADD_WINDOW_OBJECT_INTERFACE(Element)                   \
     ADD_WINDOW_OBJECT_INTERFACE(Event)                     \
     ADD_WINDOW_OBJECT_INTERFACE(EventTarget)               \

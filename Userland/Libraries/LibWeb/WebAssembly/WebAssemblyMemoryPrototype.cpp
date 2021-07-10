@@ -13,8 +13,8 @@ namespace Web::Bindings {
 void WebAssemblyMemoryPrototype::initialize(JS::GlobalObject& global_object)
 {
     Object::initialize(global_object);
-    define_native_property("buffer", buffer_getter, nullptr);
-    define_native_function("grow", grow);
+    define_native_accessor("buffer", buffer_getter, {}, JS::Attribute::Enumerable | JS::Attribute::Configurable);
+    define_native_function("grow", grow, 1, JS::Attribute::Writable | JS::Attribute::Enumerable | JS::Attribute::Configurable);
 }
 
 JS_DEFINE_NATIVE_FUNCTION(WebAssemblyMemoryPrototype::grow)
@@ -24,7 +24,7 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyMemoryPrototype::grow)
         return {};
     auto* this_object = vm.this_value(global_object).to_object(global_object);
     if (!this_object || !is<WebAssemblyMemoryObject>(this_object)) {
-        vm.throw_exception<JS::TypeError>(global_object, JS::ErrorType::NotA, "Memory");
+        vm.throw_exception<JS::TypeError>(global_object, JS::ErrorType::NotA, "WebAssembly.Memory");
         return {};
     }
     auto* memory_object = static_cast<WebAssemblyMemoryObject*>(this_object);
@@ -42,11 +42,11 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyMemoryPrototype::grow)
     return JS::Value(static_cast<u32>(previous_size));
 }
 
-JS_DEFINE_NATIVE_GETTER(WebAssemblyMemoryPrototype::buffer_getter)
+JS_DEFINE_NATIVE_FUNCTION(WebAssemblyMemoryPrototype::buffer_getter)
 {
     auto* this_object = vm.this_value(global_object).to_object(global_object);
     if (!this_object || !is<WebAssemblyMemoryObject>(this_object)) {
-        vm.throw_exception<JS::TypeError>(global_object, JS::ErrorType::NotA, "Memory");
+        vm.throw_exception<JS::TypeError>(global_object, JS::ErrorType::NotA, "WebAssembly.Memory");
         return {};
     }
     auto* memory_object = static_cast<WebAssemblyMemoryObject*>(this_object);

@@ -33,14 +33,8 @@ static constexpr size_t required_stack_alignment = 4 * MiB;
 static constexpr size_t highest_reasonable_guard_size = 32 * PAGE_SIZE;
 static constexpr size_t highest_reasonable_stack_size = 8 * MiB; // That's the default in Ubuntu?
 
-#ifndef X86_64_NO_TLS
-__thread
-#endif
-    void* s_stack_location;
-#ifndef X86_64_NO_TLS
-__thread
-#endif
-    size_t s_stack_size;
+__thread void* s_stack_location;
+__thread size_t s_stack_size;
 
 #define __RETURN_PTHREAD_ERROR(rc) \
     return ((rc) < 0 ? -(rc) : 0)
@@ -154,6 +148,12 @@ void pthread_cleanup_pop([[maybe_unused]] int execute)
 int pthread_join(pthread_t thread, void** exit_value_ptr)
 {
     int rc = syscall(SC_join_thread, thread, exit_value_ptr);
+    __RETURN_PTHREAD_ERROR(rc);
+}
+
+int pthread_kill(pthread_t thread, int sig)
+{
+    int rc = syscall(SC_kill_thread, thread, sig);
     __RETURN_PTHREAD_ERROR(rc);
 }
 
@@ -448,89 +448,6 @@ int pthread_getschedparam([[maybe_unused]] pthread_t thread, [[maybe_unused]] in
 
 int pthread_setschedparam([[maybe_unused]] pthread_t thread, [[maybe_unused]] int policy, [[maybe_unused]] const struct sched_param* param)
 {
-    return 0;
-}
-
-int pthread_cond_init(pthread_cond_t* cond, const pthread_condattr_t* attr)
-{
-    cond->value = 0;
-    cond->previous = 0;
-    cond->clockid = attr ? attr->clockid : CLOCK_MONOTONIC_COARSE;
-    return 0;
-}
-
-int pthread_cond_destroy(pthread_cond_t*)
-{
-    return 0;
-}
-
-static int futex_wait(uint32_t& futex_addr, uint32_t value, const struct timespec* abstime)
-{
-    int saved_errno = errno;
-    // NOTE: FUTEX_WAIT takes a relative timeout, so use FUTEX_WAIT_BITSET instead!
-    int rc = futex(&futex_addr, FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME, value, abstime, nullptr, FUTEX_BITSET_MATCH_ANY);
-    if (rc < 0 && errno == EAGAIN) {
-        // If we didn't wait, that's not an error
-        errno = saved_errno;
-        rc = 0;
-    }
-    return rc;
-}
-
-static int cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex, const struct timespec* abstime)
-{
-    u32 value = cond->value;
-    cond->previous = value;
-    pthread_mutex_unlock(mutex);
-    int rc = futex_wait(cond->value, value, abstime);
-    pthread_mutex_lock(mutex);
-    return rc;
-}
-
-int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex)
-{
-    int rc = cond_wait(cond, mutex, nullptr);
-    VERIFY(rc == 0);
-    return 0;
-}
-
-int pthread_condattr_init(pthread_condattr_t* attr)
-{
-    attr->clockid = CLOCK_MONOTONIC_COARSE;
-    return 0;
-}
-
-int pthread_condattr_destroy(pthread_condattr_t*)
-{
-    return 0;
-}
-
-int pthread_condattr_setclock(pthread_condattr_t* attr, clockid_t clock)
-{
-    attr->clockid = clock;
-    return 0;
-}
-
-int pthread_cond_timedwait(pthread_cond_t* cond, pthread_mutex_t* mutex, const struct timespec* abstime)
-{
-    return cond_wait(cond, mutex, abstime);
-}
-
-int pthread_cond_signal(pthread_cond_t* cond)
-{
-    u32 value = cond->previous + 1;
-    cond->value = value;
-    int rc = futex(&cond->value, FUTEX_WAKE, 1, nullptr, nullptr, 0);
-    VERIFY(rc >= 0);
-    return 0;
-}
-
-int pthread_cond_broadcast(pthread_cond_t* cond)
-{
-    u32 value = cond->previous + 1;
-    cond->value = value;
-    int rc = futex(&cond->value, FUTEX_WAKE, INT32_MAX, nullptr, nullptr, 0);
-    VERIFY(rc >= 0);
     return 0;
 }
 

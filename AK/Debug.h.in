@@ -302,10 +302,6 @@
 #cmakedefine01 NT_DEBUG
 #endif
 
-#ifndef OBJECT_DEBUG
-#cmakedefine01 OBJECT_DEBUG
-#endif
-
 #ifndef OCCLUSIONS_DEBUG
 #cmakedefine01 OCCLUSIONS_DEBUG
 #endif
@@ -388,6 +384,10 @@
 
 #ifndef SQL_DEBUG
 #cmakedefine01 SQL_DEBUG
+#endif
+
+#ifndef SQLSERVER_DEBUG
+#cmakedefine01 SQLSERVER_DEBUG
 #endif
 
 #ifndef SYNTAX_HIGHLIGHTING_DEBUG
